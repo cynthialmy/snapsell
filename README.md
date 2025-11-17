@@ -1,50 +1,67 @@
-# Welcome to your Expo app 👋
+# SnapSell
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+SnapSell is a mobile-first web app that turns a single photo of an item into a ready-to-paste resale listing block.
 
-## Get started
+## Project structure
 
-1. Install dependencies
+- `app/` – Expo Router screens (upload flow + listing preview)
+- `backend/` – FastAPI server that sends item photos to the LLM vision endpoint defined in `tools/llm_api.py`
+- `utils/` – shared API + text-formatting helpers
 
-   ```bash
-   npm install
-   ```
-
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
+## Frontend quick start
 
 ```bash
-npm run reset-project
+npm install
+npx expo start
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+The app is designed for phones first, but also works on the Expo web target.
 
-## Learn more
+## Backend quick start
 
-To learn more about developing your project with Expo, look at the following resources:
+1. **Activate the virtual environment and install dependencies:**
+```bash
+source ./venv/bin/activate
+pip install -r backend/requirements.txt
+```
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+2. **Start the backend server:**
+```bash
+uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+```
 
-## Join the community
+The `--host 0.0.0.0` flag allows the server to accept connections from other devices on your network (needed for mobile testing).
 
-Join our community of developers creating universal apps.
+The backend relies on the existing `tools/llm_api.py` helper to talk to GPT-4o (or any provider you configure).
 
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+## Environment variables
+
+Create a `.env` file (not committed) at the project root with the following variables:
+
+```
+EXPO_PUBLIC_API_URL=http://localhost:8000
+OPENAI_API_KEY=sk-...
+OPENAI_MODEL_DEPLOYMENT=gpt-4o
+# Optional: SNAPSELL_ALLOWED_ORIGINS=http://localhost:8081,http://localhost:5173
+```
+
+**Important for mobile devices:** If you're testing on a physical device or emulator, you need to set `EXPO_PUBLIC_API_URL` to your computer's local IP address instead of `localhost`.
+
+To find your IP address:
+- **macOS/Linux:** Run `ifconfig | grep "inet " | grep -v 127.0.0.1`
+- **Windows:** Run `ipconfig` and look for IPv4 Address
+
+Then update your `.env`:
+```
+EXPO_PUBLIC_API_URL=http://192.168.1.100:8000  # Replace with your actual IP
+```
+
+These values are loaded both by the Expo app (for the API base URL) and the FastAPI backend via `python-dotenv`.
+
+## Workflow
+
+1. Open the app and tap **Snap / Upload Item**
+2. Choose a single photo; SnapSell uploads it to `/api/analyze-image`
+3. The backend calls the configured LLM vision model and returns structured data
+4. Tweak the listing on the preview screen and press **Copy listing text**
+5. Tap **Add next item** to repeat the flow
