@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: snapsell-backend
+    env: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    envVars:
+      - key: OPENAI_API_KEY
+        sync: false
+      - key: OPENAI_MODEL_DEPLOYMENT
+        value: gpt-4o
+      - key: AZURE_OPENAI_API_KEY
+        sync: false
+      - key: AZURE_OPENAI_ENDPOINT
+        sync: false
+      - key: AZURE_OPENAI_MODEL_DEPLOYMENT
+        sync: false
+      - key: AZURE_OPENAI_API_VERSION
+        value: 2024-08-01-preview
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: SNAPSELL_ALLOWED_ORIGINS
+        value: "*"
