@@ -102,9 +102,9 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 
 # Scratchpad
 
-Task: Keep UI inside mobile safe area (no overlap top bar).
+Task: Fix ImagePicker mediaTypes crash (“Cannot read property 'Images' of undefined”).
 
-[X] Inspect current layout to find overflowing component(s)
-[X] Add SafeArea handling (SafeAreaView / CSS padding) at root
-[X] Verify styling across screens (upload + listing preview)
-[X] Document change + follow-up checks
+[X] Investigate cause (ImagePicker.MediaType undefined at runtime)
+[X] Update launchCameraAsync options to use string mediaTypes
+[X] Update launchImageLibraryAsync options likewise
+[X] Run lint check / sanity review

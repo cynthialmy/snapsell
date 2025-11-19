@@ -27,10 +27,10 @@ function getApiUrl(): string {
   // Default to localhost for web, but mobile devices need the local network IP
   const defaultUrl = 'http://localhost:8000';
 
-  // On mobile, localhost won't work - user needs to set EXPO_PUBLIC_API_URL to their computer's IP
+  // On mobile, localhost won't work - user needs to set EXPO_PUBLIC_API_URL to the hosted backend URL
   if (Platform.OS !== 'web') {
     console.warn(
-      'EXPO_PUBLIC_API_URL not set. On mobile devices, set it to your computer\'s IP address (e.g., http://192.168.1.100:8000)'
+      'EXPO_PUBLIC_API_URL not set. Set it to your hosted backend URL (e.g., https://snapsell-backend.onrender.com)'
     );
   }
 
@@ -48,11 +48,12 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
     const blob = await response.blob();
     formData.append('image', blob, filename);
   } else {
-    const normalizedUri =
-      Platform.OS === 'ios' && uri.startsWith('file://') ? uri.replace('file://', '') : uri;
-
+    // For React Native, use the URI as-is
+    // iOS: can work with or without file:// prefix
+    // Android: typically needs file:// prefix
+    // The FormData implementation will handle it correctly
     formData.append('image', {
-      uri: normalizedUri,
+      uri: uri,
       name: filename,
       type: mimeType,
     } as any);
@@ -67,12 +68,23 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
   }
 
   try {
+    console.log('Uploading image to:', `${API_URL}/api/analyze-image`);
+    console.log('Platform:', Platform.OS);
+
+    // On React Native, don't set Content-Type header - let the system set it with boundary
+    const headers: HeadersInit = {
+      Accept: 'application/json',
+    };
+
+    // Only set Content-Type on web
+    if (Platform.OS === 'web') {
+      // FormData will be handled automatically by fetch on web
+    }
+
     const response = await fetch(`${API_URL}/api/analyze-image`, {
       method: 'POST',
       body: formData,
-      headers: {
-        Accept: 'application/json',
-      },
+      headers,
     });
 
     if (!response.ok) {
@@ -83,16 +95,27 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
     const json = (await response.json()) as ListingData;
     return json;
   } catch (error) {
-    if (error instanceof TypeError && error.message.includes('fetch')) {
-      // Network error - likely backend not running or wrong URL
+    // Handle network errors (including "network request failed")
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    const isNetworkError =
+      error instanceof TypeError ||
+      errorMessage.toLowerCase().includes('network') ||
+      errorMessage.toLowerCase().includes('fetch') ||
+      errorMessage.toLowerCase().includes('failed') ||
+      errorMessage.toLowerCase().includes('connection');
+
+    if (isNetworkError) {
       const isLocalhost = API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
       if (Platform.OS !== 'web' && isLocalhost) {
         throw new Error(
-          'Cannot connect to backend. On mobile devices, set EXPO_PUBLIC_API_URL in .env to your computer\'s IP address (e.g., http://192.168.1.100:8000). Make sure the backend server is running.'
+          'Cannot connect to backend. On mobile devices, localhost won\'t work. Please set EXPO_PUBLIC_API_URL in your .env file to your hosted backend URL (e.g., https://snapsell-backend.onrender.com).'
         );
       }
       throw new Error(
-        'Cannot connect to backend server. Make sure it\'s running on ' + API_URL
+        `Network request failed. Cannot connect to backend at ${API_URL}. Please check:\n\n` +
+        '1. Your internet connection\n' +
+        '2. The backend server is running and accessible\n' +
+        '3. EXPO_PUBLIC_API_URL is set correctly in your .env file'
       );
     }
     throw error;

@@ -27,30 +27,7 @@ export default function HomeScreen() {
     [isAnalyzing],
   );
 
-  const handlePickImage = async () => {
-    setErrorMessage(null);
-
-    const permission =
-      Platform.OS === 'web'
-        ? { granted: true }
-        : await ImagePicker.requestMediaLibraryPermissionsAsync();
-
-    if (!permission.granted) {
-      Alert.alert('Permission needed', 'Please allow SnapSell to access your photos.');
-      return;
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      allowsMultipleSelection: false,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
-    });
-
-    if (result.canceled) {
-      return;
-    }
-
-    const asset = result.assets[0];
+  const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
     setLastImageUri(asset.uri);
     setIsAnalyzing(true);
 
@@ -69,6 +46,102 @@ export default function HomeScreen() {
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  const handleTakePhoto = async () => {
+    setErrorMessage(null);
+
+    if (Platform.OS === 'web') {
+      Alert.alert('Not available', 'Camera is not available on web. Please use "Choose from Library" instead.');
+      return;
+    }
+
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Please allow SnapSell to access your camera.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: 'images',
+        quality: 0.9,
+        allowsEditing: false,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      await processImage(asset);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('simulator') || errorMessage.includes('not available')) {
+        Alert.alert(
+          'Camera not available',
+          'Camera is not available on simulator. Please use "Choose from Library" or test on a physical device.',
+        );
+      } else {
+        setErrorMessage('Failed to open camera. Please try again or use "Choose from Library".');
+      }
+    }
+  };
+
+  const handleChooseFromLibrary = async () => {
+    setErrorMessage(null);
+
+    const permission =
+      Platform.OS === 'web'
+        ? { granted: true }
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please allow SnapSell to access your photos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsMultipleSelection: false,
+      mediaTypes: 'images',
+      quality: 0.9,
+    });
+
+    if (result.canceled) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    await processImage(asset);
+  };
+
+  const handlePickImage = () => {
+    if (Platform.OS === 'web') {
+      // On web, only show library option
+      handleChooseFromLibrary();
+      return;
+    }
+
+    Alert.alert(
+      'Select Photo',
+      'Choose an option',
+      [
+        {
+          text: 'Take Photo',
+          onPress: handleTakePhoto,
+        },
+        {
+          text: 'Choose from Library',
+          onPress: handleChooseFromLibrary,
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ],
+      { cancelable: true },
+    );
   };
 
   const navigateToPreview = (payload: { listing: ListingData; imageUri: string }) => {
