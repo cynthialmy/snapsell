@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { SnappyLoading } from '@/components/snappy-loading';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 
@@ -219,6 +220,7 @@ export default function HomeScreen() {
           )}
         </View>
       </ScrollView>
+      <SnappyLoading visible={isAnalyzing} />
     </SafeAreaView>
   );
 }
