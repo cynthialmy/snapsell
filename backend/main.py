@@ -59,7 +59,7 @@ Analyze the attached product photo and return ONLY valid JSON (no markdown, no c
 
 Rules:
 - Return ONLY the JSON object, nothing else. No markdown code blocks, no explanations, no text before or after.
-- Estimate price in the local currency without symbols (e.g., 45, 1200). If unsure, leave empty string.
+- Estimate price based on the item's condition, brand, age, and market value. Use realistic pricing (e.g., a used chair might be 45-150, a new phone might be 500-1200). If you cannot reasonably estimate the price, return an empty string. Do NOT use placeholder values like 120.
 - Keep description under 400 characters.
 - Prefer realistic consumer-friendly language.
 - If you cannot infer a field, return an empty string for that field.

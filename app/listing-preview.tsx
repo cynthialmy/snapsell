@@ -20,6 +20,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import type { ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
+import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
 
 type PreviewPayload = {
   listing: ListingData;
@@ -67,6 +68,7 @@ export default function ListingPreviewScreen() {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [showConditionModal, setShowConditionModal] = useState(false);
+  const [currency, setCurrency] = useState<string>('$');
 
   const previewText = useMemo(
     () =>
@@ -80,8 +82,9 @@ export default function ListingPreviewScreen() {
         pickupAvailable,
         shippingAvailable,
         pickupNotes,
+        currency,
       }),
-    [title, brand, price, description, condition, location, pickupAvailable, shippingAvailable, pickupNotes],
+    [title, brand, price, description, condition, location, pickupAvailable, shippingAvailable, pickupNotes, currency],
   );
 
   useEffect(() => {
@@ -91,6 +94,52 @@ export default function ListingPreviewScreen() {
       ]);
     }
   }, [payload, router]);
+
+  // Load saved preferences on mount
+  useEffect(() => {
+    const loadSavedPreferences = async () => {
+      const prefs = await loadPreferences();
+      if (prefs) {
+        // Only apply preferences if they're not already set from the listing
+        const currentLocation = listing?.location ?? '';
+        if (!currentLocation && prefs.location) {
+          setLocation(prefs.location);
+        }
+        // Always load pickup/shipping preferences from saved preferences
+        if (prefs.pickupAvailable !== undefined) {
+          setPickupAvailable(prefs.pickupAvailable);
+        }
+        if (prefs.shippingAvailable !== undefined) {
+          setShippingAvailable(prefs.shippingAvailable);
+        }
+        if (prefs.pickupNotes) {
+          setPickupNotes(prefs.pickupNotes);
+        }
+        if (prefs.currency) {
+          setCurrency(prefs.currency);
+        }
+      }
+    };
+    loadSavedPreferences();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Save preferences when they change
+  useEffect(() => {
+    const savePrefs = async () => {
+      const prefs: UserPreferences = {
+        location,
+        pickupAvailable,
+        shippingAvailable,
+        pickupNotes,
+        currency,
+      };
+      await savePreferences(prefs);
+    };
+    // Debounce saves to avoid too many writes
+    const timer = setTimeout(savePrefs, 500);
+    return () => clearTimeout(timer);
+  }, [location, pickupAvailable, shippingAvailable, pickupNotes, currency]);
 
 
   if (!payload) {
@@ -193,16 +242,31 @@ export default function ListingPreviewScreen() {
 
             <View style={styles.row}>
               <Field label="Price" style={styles.flex}>
-                <TextInput
-                  value={price}
-                  onChangeText={text => {
-                    setPrice(text);
-                    setCopySuccess(false);
-                  }}
-                  style={styles.input}
-                  placeholder="120"
-                  keyboardType="numeric"
-                />
+                <View style={styles.priceRow}>
+                  <View style={styles.currencySelector}>
+                    <Pressable
+                      onPress={() => {
+                        const currencies = ['$', '€', '£', 'kr', '¥'];
+                        const currentIndex = currencies.indexOf(currency);
+                        const nextIndex = (currentIndex + 1) % currencies.length;
+                        setCurrency(currencies[nextIndex]);
+                        setCopySuccess(false);
+                      }}
+                      style={styles.currencyButton}>
+                      <Text style={styles.currencyButtonText}>{currency}</Text>
+                    </Pressable>
+                  </View>
+                  <TextInput
+                    value={price}
+                    onChangeText={text => {
+                      setPrice(text);
+                      setCopySuccess(false);
+                    }}
+                    style={[styles.input, styles.priceInput]}
+                    placeholder="120"
+                    keyboardType="numeric"
+                  />
+                </View>
               </Field>
               <Field label="Condition" style={styles.flex}>
                 <View style={styles.dropdownContainer}>
@@ -216,30 +280,35 @@ export default function ListingPreviewScreen() {
                   </Pressable>
                   {showConditionModal && (
                     <View style={styles.dropdown}>
-                      {CONDITION_OPTIONS.map(option => (
-                        <TouchableOpacity
-                          key={option}
-                          onPress={() => {
-                            setCondition(option);
-                            setCopySuccess(false);
-                            setShowConditionModal(false);
-                          }}
-                          style={[
-                            styles.dropdownOption,
-                            condition === option && styles.dropdownOptionSelected,
-                          ]}>
-                          <Text
+                      <ScrollView
+                        style={styles.dropdownScroll}
+                        nestedScrollEnabled
+                        showsVerticalScrollIndicator>
+                        {CONDITION_OPTIONS.map(option => (
+                          <TouchableOpacity
+                            key={option}
+                            onPress={() => {
+                              setCondition(option);
+                              setCopySuccess(false);
+                              setShowConditionModal(false);
+                            }}
                             style={[
-                              styles.dropdownOptionText,
-                              condition === option && styles.dropdownOptionTextSelected,
+                              styles.dropdownOption,
+                              condition === option && styles.dropdownOptionSelected,
                             ]}>
-                            {option}
-                          </Text>
-                          {condition === option && (
-                            <Text style={styles.dropdownOptionCheck}>✓</Text>
-                          )}
-                        </TouchableOpacity>
-                      ))}
+                            <Text
+                              style={[
+                                styles.dropdownOptionText,
+                                condition === option && styles.dropdownOptionTextSelected,
+                              ]}>
+                              {option}
+                            </Text>
+                            {condition === option && (
+                              <Text style={styles.dropdownOptionCheck}>✓</Text>
+                            )}
+                          </TouchableOpacity>
+                        ))}
+                      </ScrollView>
                     </View>
                   )}
                 </View>
@@ -477,8 +546,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.15,
     shadowRadius: 8,
     elevation: 8,
-    maxHeight: 200,
+    maxHeight: 250,
     overflow: 'hidden',
+  },
+  dropdownScroll: {
+    maxHeight: 250,
   },
   dropdownOption: {
     flexDirection: 'row',
@@ -506,6 +578,32 @@ const styles = StyleSheet.create({
     color: '#4338CA',
     marginLeft: 8,
     fontWeight: '700',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  currencySelector: {
+    minWidth: 50,
+  },
+  currencyButton: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#F8FAFC',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  currencyButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0F172A',
+  },
+  priceInput: {
+    flex: 1,
   },
   locationRow: {
     flexDirection: 'row',

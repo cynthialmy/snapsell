@@ -1,6 +1,6 @@
 import type { ListingData } from './api';
 
-export function formatListingText(listing: ListingData): string {
+export function formatListingText(listing: ListingData & { currency?: string }): string {
   const segments: string[] = [];
   const trim = (value?: string | null) => (value ? value.trim() : '');
 
@@ -14,12 +14,17 @@ export function formatListingText(listing: ListingData): string {
   const price = trim(listing.price);
   const condition = trim(listing.condition);
   const location = trim(listing.location);
+  const currency = listing.currency || '$';
 
   if (brand) {
     metadata.push(`Brand: ${brand}`);
   }
   if (price) {
-    metadata.push(`Price: ${price}`);
+    // Format price with currency
+    const formattedPrice = currency === 'kr' || currency === '¥'
+      ? `${price} ${currency}`
+      : `${currency}${price}`;
+    metadata.push(`Price: ${formattedPrice}`);
   }
   if (condition) {
     metadata.push(`Condition: ${condition}`);
