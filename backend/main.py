@@ -19,6 +19,10 @@ class ListingData(BaseModel):
   description: str
   condition: str
   location: str
+  brand: str = ""
+  pickupAvailable: bool = False
+  shippingAvailable: bool = False
+  pickupNotes: str = ""
 
 
 app = FastAPI(
@@ -62,6 +66,20 @@ Rules:
 """
 
 
+def _to_bool(value: Any) -> bool:
+  if isinstance(value, bool):
+    return value
+  if isinstance(value, (int, float)):
+    return bool(value)
+  if isinstance(value, str):
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "y"}:
+      return True
+    if normalized in {"0", "false", "no", "n"}:
+      return False
+  return False
+
+
 def _normalize_listing(payload: Dict[str, Any]) -> ListingData:
   fallback = {
     "title": payload.get("title") or "",
@@ -69,6 +87,10 @@ def _normalize_listing(payload: Dict[str, Any]) -> ListingData:
     "description": payload.get("description") or "",
     "condition": payload.get("condition") or "",
     "location": payload.get("location") or "",
+    "brand": payload.get("brand") or "",
+    "pickupAvailable": _to_bool(payload.get("pickupAvailable")),
+    "shippingAvailable": _to_bool(payload.get("shippingAvailable")),
+    "pickupNotes": payload.get("pickupNotes") or "",
   }
   return ListingData(**fallback)
 

@@ -14,7 +14,13 @@ export default function RootLayout() {
       <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <Stack>
           <Stack.Screen name="index" options={{ headerShown: false }} />
-          <Stack.Screen name="listing-preview" options={{ title: 'Listing Preview' }} />
+          <Stack.Screen
+            name="listing-preview"
+            options={{
+              title: 'Listing Preview',
+              headerBackTitle: 'Home',
+            }}
+          />
         </Stack>
         <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
       </ThemeProvider>

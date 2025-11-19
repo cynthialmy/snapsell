@@ -6,6 +6,10 @@ export type ListingData = {
   description: string;
   condition: string;
   location: string;
+  brand?: string;
+  pickupAvailable?: boolean;
+  shippingAvailable?: boolean;
+  pickupNotes?: string;
 };
 
 type AnalyzeOptions = {

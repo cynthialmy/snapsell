@@ -2,27 +2,50 @@ import type { ListingData } from './api';
 
 export function formatListingText(listing: ListingData): string {
   const segments: string[] = [];
+  const trim = (value?: string | null) => (value ? value.trim() : '');
 
-  if (listing.title?.trim()) {
-    segments.push(listing.title.trim());
+  const title = trim(listing.title);
+  if (title) {
+    segments.push(title);
   }
 
   const metadata: string[] = [];
-  if (listing.price?.trim()) {
-    metadata.push(`Price: ${listing.price.trim()}`);
+  const brand = trim(listing.brand);
+  const price = trim(listing.price);
+  const condition = trim(listing.condition);
+  const location = trim(listing.location);
+
+  if (brand) {
+    metadata.push(`Brand: ${brand}`);
   }
-  if (listing.condition?.trim()) {
-    metadata.push(`Condition: ${listing.condition.trim()}`);
+  if (price) {
+    metadata.push(`Price: ${price}`);
   }
-  if (listing.location?.trim()) {
-    metadata.push(`Location: ${listing.location.trim()}`);
+  if (condition) {
+    metadata.push(`Condition: ${condition}`);
+  }
+  if (location) {
+    metadata.push(`Location: ${location}`);
   }
   if (metadata.length) {
     segments.push(metadata.join(' • '));
   }
 
-  if (listing.description?.trim()) {
-    segments.push('', listing.description.trim());
+  const logistics: string[] = [];
+  if (listing.pickupAvailable) {
+    const notes = trim(listing.pickupNotes);
+    logistics.push(notes ? `Pickup available (${notes})` : 'Pickup available');
+  }
+  if (listing.shippingAvailable) {
+    logistics.push('Shipping available');
+  }
+  if (logistics.length) {
+    segments.push(logistics.join(' • '));
+  }
+
+  const description = trim(listing.description);
+  if (description) {
+    segments.push('', description);
   }
 
   return segments.join('\n').trim();

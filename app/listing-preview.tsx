@@ -1,5 +1,6 @@
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
+import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import {
@@ -9,8 +10,10 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -22,6 +25,14 @@ type PreviewPayload = {
   listing: ListingData;
   imageUri: string;
 };
+
+const CONDITION_OPTIONS = [
+  'New',
+  'Used - Like New',
+  'Used - Good',
+  'Used - Fair',
+  'Refurbished',
+];
 
 export default function ListingPreviewScreen() {
   const router = useRouter();
@@ -36,12 +47,42 @@ export default function ListingPreviewScreen() {
     }
   }, [params.payload]);
 
-  const [title, setTitle] = useState(payload?.listing.title ?? '');
-  const [price, setPrice] = useState(payload?.listing.price ?? '');
-  const [description, setDescription] = useState(payload?.listing.description ?? '');
-  const [condition, setCondition] = useState(payload?.listing.condition ?? '');
-  const [location, setLocation] = useState(payload?.listing.location ?? '');
+  const listing = payload?.listing;
+
+  const [title, setTitle] = useState(listing?.title ?? '');
+  const [brand, setBrand] = useState(listing?.brand ?? '');
+  const [price, setPrice] = useState(listing?.price ?? '');
+  const [description, setDescription] = useState(listing?.description ?? '');
+  const [condition, setCondition] = useState(() => {
+    const candidate = listing?.condition;
+    if (candidate && CONDITION_OPTIONS.includes(candidate)) {
+      return candidate;
+    }
+    return CONDITION_OPTIONS[2];
+  });
+  const [location, setLocation] = useState(listing?.location ?? '');
+  const [pickupAvailable, setPickupAvailable] = useState(listing?.pickupAvailable ?? false);
+  const [shippingAvailable, setShippingAvailable] = useState(listing?.shippingAvailable ?? false);
+  const [pickupNotes, setPickupNotes] = useState(listing?.pickupNotes ?? '');
   const [copySuccess, setCopySuccess] = useState(false);
+  const [isLocating, setIsLocating] = useState(false);
+  const [showConditionModal, setShowConditionModal] = useState(false);
+
+  const previewText = useMemo(
+    () =>
+      formatListingText({
+        title,
+        brand,
+        price,
+        description,
+        condition,
+        location,
+        pickupAvailable,
+        shippingAvailable,
+        pickupNotes,
+      }),
+    [title, brand, price, description, condition, location, pickupAvailable, shippingAvailable, pickupNotes],
+  );
 
   useEffect(() => {
     if (!payload) {
@@ -51,13 +92,13 @@ export default function ListingPreviewScreen() {
     }
   }, [payload, router]);
 
+
   if (!payload) {
     return null;
   }
 
   const handleCopy = async () => {
-    const text = formatListingText({ title, price, description, condition, location });
-    await Clipboard.setStringAsync(text);
+    await Clipboard.setStringAsync(previewText);
     setCopySuccess(true);
   };
 
@@ -66,12 +107,55 @@ export default function ListingPreviewScreen() {
     router.replace('/');
   };
 
+  const handleLocateMe = async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not available', 'Location services are not available on web.');
+      return;
+    }
+
+    setIsLocating(true);
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Please allow SnapSell to access your location.');
+        setIsLocating(false);
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const geocode = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      if (geocode && geocode.length > 0) {
+        const addr = geocode[0];
+        const parts: string[] = [];
+        if (addr.city) parts.push(addr.city);
+        if (addr.region) parts.push(addr.region);
+        if (addr.country) parts.push(addr.country);
+        setLocation(parts.join(', ') || '');
+        setCopySuccess(false);
+      }
+    } catch (error) {
+      Alert.alert('Error', 'Failed to get location. Please enter it manually.');
+    } finally {
+      setIsLocating(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.root}>
-        <ScrollView contentContainerStyle={styles.content}>
+        <ScrollView
+          contentContainerStyle={styles.content}
+          onScrollBeginDrag={() => {
+            if (showConditionModal) {
+              setShowConditionModal(false);
+            }
+          }}>
           <Text style={styles.eyebrow}>Listing preview</Text>
           <Text style={styles.header}>Tweak anything, then copy the finished block.</Text>
 
@@ -95,8 +179,20 @@ export default function ListingPreviewScreen() {
               />
             </Field>
 
+            <Field label="Brand (optional)">
+              <TextInput
+                value={brand}
+                onChangeText={text => {
+                  setBrand(text);
+                  setCopySuccess(false);
+                }}
+                style={styles.input}
+                placeholder="e.g. IKEA"
+              />
+            </Field>
+
             <View style={styles.row}>
-              <Field label="Price (numbers only)" style={styles.flex}>
+              <Field label="Price" style={styles.flex}>
                 <TextInput
                   value={price}
                   onChangeText={text => {
@@ -109,29 +205,111 @@ export default function ListingPreviewScreen() {
                 />
               </Field>
               <Field label="Condition" style={styles.flex}>
-                <TextInput
-                  value={condition}
-                  onChangeText={text => {
-                    setCondition(text);
-                    setCopySuccess(false);
-                  }}
-                  style={styles.input}
-                  placeholder="Used - Good"
-                />
+                <View style={styles.dropdownContainer}>
+                  <Pressable
+                    onPress={() => setShowConditionModal(!showConditionModal)}
+                    style={styles.conditionButton}>
+                    <Text style={styles.conditionButtonText}>{condition}</Text>
+                    <Text style={styles.conditionButtonArrow}>
+                      {showConditionModal ? '▲' : '▼'}
+                    </Text>
+                  </Pressable>
+                  {showConditionModal && (
+                    <View style={styles.dropdown}>
+                      {CONDITION_OPTIONS.map(option => (
+                        <TouchableOpacity
+                          key={option}
+                          onPress={() => {
+                            setCondition(option);
+                            setCopySuccess(false);
+                            setShowConditionModal(false);
+                          }}
+                          style={[
+                            styles.dropdownOption,
+                            condition === option && styles.dropdownOptionSelected,
+                          ]}>
+                          <Text
+                            style={[
+                              styles.dropdownOptionText,
+                              condition === option && styles.dropdownOptionTextSelected,
+                            ]}>
+                            {option}
+                          </Text>
+                          {condition === option && (
+                            <Text style={styles.dropdownOptionCheck}>✓</Text>
+                          )}
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  )}
+                </View>
               </Field>
             </View>
 
             <Field label="Location (optional)">
-              <TextInput
-                value={location}
-                onChangeText={text => {
-                  setLocation(text);
-                  setCopySuccess(false);
-                }}
-                style={styles.input}
-                placeholder="Oslo, Norway"
-              />
+              <View style={styles.locationRow}>
+                <TextInput
+                  value={location}
+                  onChangeText={text => {
+                    setLocation(text);
+                    setCopySuccess(false);
+                  }}
+                  style={[styles.input, styles.locationInput]}
+                  placeholder="Oslo, Norway"
+                />
+                <Pressable
+                  onPress={handleLocateMe}
+                  disabled={isLocating}
+                  style={({ pressed }) => [
+                    styles.locateButton,
+                    pressed && styles.locateButtonPressed,
+                    isLocating && styles.locateButtonDisabled,
+                  ]}>
+                  <Text style={styles.locateButtonText}>
+                    {isLocating ? 'Locating...' : 'Locate me'}
+                  </Text>
+                </Pressable>
+              </View>
             </Field>
+
+            <View style={styles.section}>
+              <Text style={styles.sectionTitle}>Pickup & shipping</Text>
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Pickup available</Text>
+                <Switch
+                  value={pickupAvailable}
+                  onValueChange={value => {
+                    setPickupAvailable(value);
+                    setCopySuccess(false);
+                  }}
+                />
+              </View>
+              {pickupAvailable ? (
+                <View style={styles.notesField}>
+                  <Text style={styles.label}>Pickup notes (optional)</Text>
+                  <TextInput
+                    value={pickupNotes}
+                    onChangeText={text => {
+                      setPickupNotes(text);
+                      setCopySuccess(false);
+                    }}
+                    style={[styles.input, styles.textAreaSmall]}
+                    placeholder="e.g. Evenings only, Oslo west"
+                    multiline
+                  />
+                </View>
+              ) : null}
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Shipping available</Text>
+                <Switch
+                  value={shippingAvailable}
+                  onValueChange={value => {
+                    setShippingAvailable(value);
+                    setCopySuccess(false);
+                  }}
+                />
+              </View>
+            </View>
 
             <Field label="Description">
               <TextInput
@@ -146,6 +324,13 @@ export default function ListingPreviewScreen() {
                 numberOfLines={5}
               />
             </Field>
+          </View>
+
+          <View style={styles.previewCard}>
+            <Text style={styles.previewTitle}>Listing preview</Text>
+            <Text style={styles.previewContent}>
+              {previewText || 'Your formatted listing text will appear here as you fill the details.'}
+            </Text>
           </View>
 
           <Pressable
@@ -241,12 +426,156 @@ const styles = StyleSheet.create({
     minHeight: 120,
     textAlignVertical: 'top',
   },
+  textAreaSmall: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
   row: {
     flexDirection: 'row',
     gap: 12,
   },
   flex: {
     flex: 1,
+  },
+  conditionButton: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    backgroundColor: '#F8FAFC',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  conditionButtonText: {
+    fontSize: 16,
+    color: '#0F172A',
+    flex: 1,
+  },
+  conditionButtonArrow: {
+    fontSize: 12,
+    color: '#64748B',
+    marginLeft: 8,
+  },
+  dropdownContainer: {
+    position: 'relative',
+    zIndex: 1000,
+  },
+  dropdown: {
+    position: 'absolute',
+    top: '100%',
+    left: 0,
+    right: 0,
+    marginTop: 4,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 8,
+    maxHeight: 200,
+    overflow: 'hidden',
+  },
+  dropdownOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+  },
+  dropdownOptionSelected: {
+    backgroundColor: '#EEF2FF',
+  },
+  dropdownOptionText: {
+    fontSize: 16,
+    color: '#0F172A',
+    flex: 1,
+  },
+  dropdownOptionTextSelected: {
+    fontWeight: '600',
+    color: '#4338CA',
+  },
+  dropdownOptionCheck: {
+    fontSize: 16,
+    color: '#4338CA',
+    marginLeft: 8,
+    fontWeight: '700',
+  },
+  locationRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  locationInput: {
+    flex: 1,
+  },
+  locateButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#EEF2FF',
+    borderWidth: 1,
+    borderColor: '#CBD5F5',
+    justifyContent: 'center',
+    alignItems: 'center',
+    minWidth: 100,
+  },
+  locateButtonPressed: {
+    backgroundColor: '#E0E7FF',
+  },
+  locateButtonDisabled: {
+    opacity: 0.5,
+  },
+  locateButtonText: {
+    color: '#4338CA',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  section: {
+    gap: 12,
+  },
+  sectionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+  },
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  toggleLabel: {
+    fontSize: 16,
+    color: '#0F172A',
+    fontWeight: '500',
+  },
+  notesField: {
+    gap: 8,
+  },
+  previewCard: {
+    marginTop: 8,
+    backgroundColor: '#0F172A',
+    borderRadius: 16,
+    padding: 20,
+    gap: 8,
+  },
+  previewTitle: {
+    color: '#A5B4FC',
+    fontSize: 14,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+    fontWeight: '600',
+  },
+  previewContent: {
+    color: '#F8FAFC',
+    fontSize: 16,
+    lineHeight: 22,
   },
   copyButton: {
     backgroundColor: '#0F172A',

@@ -14,7 +14,9 @@
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
         "NSCameraUsageDescription": "SnapSell needs access to your camera to take photos of items you want to sell.",
-        "NSPhotoLibraryUsageDescription": "SnapSell needs access to your photo library to select photos of items you want to sell."
+        "NSPhotoLibraryUsageDescription": "SnapSell needs access to your photo library to select photos of items you want to sell.",
+        "NSLocationWhenInUseUsageDescription": "SnapSell needs access to your location to automatically fill in your location for listings.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "SnapSell needs access to your location to automatically fill in your location for listings."
       }
     },
     "android": {
@@ -30,7 +32,9 @@
       "permissions": [
         "CAMERA",
         "READ_EXTERNAL_STORAGE",
-        "READ_MEDIA_IMAGES"
+        "READ_MEDIA_IMAGES",
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION"
       ]
     },
     "web": {
@@ -56,6 +60,13 @@
         {
           "photosPermission": "SnapSell needs access to your photo library to select photos of items you want to sell.",
           "cameraPermission": "SnapSell needs access to your camera to take photos of items you want to sell."
+        }
+      ],
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "SnapSell needs access to your location to automatically fill in your location for listings.",
+          "locationWhenInUsePermission": "SnapSell needs access to your location to automatically fill in your location for listings."
         }
       ]
     ],
