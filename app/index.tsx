@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
+import { formatListingText } from '@/utils/listingFormatter';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -152,16 +153,29 @@ export default function HomeScreen() {
     });
   };
 
+  const sampleListing: ListingData = {
+    title: 'Mid-century oak chair',
+    brand: 'IKEA',
+    price: '85',
+    condition: 'Used - Good',
+    location: 'Oslo, Norway',
+    description: 'Beautiful vintage oak chair in excellent condition. Perfect for a dining room or home office. Minor wear consistent with age, but structurally sound and comfortable.',
+    pickupAvailable: true,
+    shippingAvailable: false,
+    pickupNotes: '',
+  };
+
+  const sampleListingText = useMemo(
+    () => formatListingText({ ...sampleListing, currency: '$' }),
+    [],
+  );
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.eyebrow}>SNAPSELL</Text>
         <Text style={styles.title}>Turn a single photo into a ready-to-post listing.</Text>
-        <Text style={styles.subtitle}>
-          Upload once. SnapSell writes the title, pricing guess, and selling copy for Facebook
-          Marketplace, Tise, Blocket, and more.
-        </Text>
 
         <Pressable
           accessibilityRole="button"
@@ -189,9 +203,17 @@ export default function HomeScreen() {
           <Text style={styles.stepsTitle}>How it works</Text>
           {['Snap / upload photo', 'AI drafts the listing', 'Copy & paste anywhere'].map(
             (step, idx) => (
-              <View key={step} style={styles.stepItem}>
-                <Text style={styles.stepNumber}>{idx + 1}</Text>
-                <Text style={styles.stepLabel}>{step}</Text>
+              <View key={step}>
+                <View style={styles.stepItem}>
+                  <Text style={styles.stepNumber}>{idx + 1}</Text>
+                  <Text style={styles.stepLabel}>{step}</Text>
+                </View>
+                {idx === 1 && (
+                  <View style={styles.samplePreviewCard}>
+                    <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
+                    <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
+                  </View>
+                )}
               </View>
             ),
           )}
@@ -297,5 +319,28 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#0F172A',
     fontWeight: '500',
+  },
+  samplePreviewCard: {
+    backgroundColor: '#F8F9FA',
+    borderRadius: 12,
+    padding: 16,
+    marginTop: 8,
+    marginLeft: 40,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  samplePreviewLabel: {
+    fontSize: 12,
+    color: '#64748B',
+    fontWeight: '600',
+    marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  samplePreviewText: {
+    fontSize: 14,
+    color: '#0F172A',
+    lineHeight: 20,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
 });
