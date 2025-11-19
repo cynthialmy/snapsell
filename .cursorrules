@@ -102,9 +102,8 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 
 # Scratchpad
 
-Task: Fix ImagePicker mediaTypes crash (“Cannot read property 'Images' of undefined”).
+Task: Diagnose hosted backend connectivity error from mobile app.
 
-[X] Investigate cause (ImagePicker.MediaType undefined at runtime)
-[X] Update launchCameraAsync options to use string mediaTypes
-[X] Update launchImageLibraryAsync options likewise
-[X] Run lint check / sanity review
+[X] Reproduce/understand network failure details
+[X] Inspect backend configuration (env, port, CORS)
+[X] Provide/apply fix to ensure mobile app can reach backend

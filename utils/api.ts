@@ -16,21 +16,42 @@ type AnalyzeOptions = {
   model?: string;
 };
 
+const HOSTED_BACKEND_URL = 'https://snapsell-backend.onrender.com';
+const ALLOW_DEVICE_LOCALHOST =
+  process.env.EXPO_PUBLIC_ALLOW_DEVICE_LOCALHOST?.toLowerCase() === 'true';
+
+function isLoopbackUrl(value: string): boolean {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('localhost') ||
+    lower.includes('127.0.0.1') ||
+    lower.includes('::1') ||
+    lower.includes('10.0.2.2')
+  );
+}
+
 // Get API URL, replacing localhost with the local network IP for mobile devices
 function getApiUrl(): string {
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (envUrl) {
-    // If explicitly set, use it
+    if (Platform.OS !== 'web' && !ALLOW_DEVICE_LOCALHOST && isLoopbackUrl(envUrl)) {
+      console.warn(
+        `EXPO_PUBLIC_API_URL points to ${envUrl}, which isn't reachable from physical devices. ` +
+        `Defaulting to hosted backend at ${HOSTED_BACKEND_URL}. Set EXPO_PUBLIC_ALLOW_DEVICE_LOCALHOST=true if you really want to use a local network tunnel.`,
+      );
+      return HOSTED_BACKEND_URL;
+    }
+    // If explicitly set (and allowed), use it
     return envUrl;
   }
 
-  // Default to localhost for web, but mobile devices need the local network IP
-  const defaultUrl = 'http://localhost:8000';
+  // Default to localhost for web, but mobile devices should use hosted backend
+  const defaultUrl = Platform.OS === 'web' ? 'http://localhost:8000' : HOSTED_BACKEND_URL;
 
-  // On mobile, localhost won't work - user needs to set EXPO_PUBLIC_API_URL to the hosted backend URL
+  // On mobile, localhost won't work - default to hosted backend unless overridden
   if (Platform.OS !== 'web') {
     console.warn(
-      'EXPO_PUBLIC_API_URL not set. Set it to your hosted backend URL (e.g., https://snapsell-backend.onrender.com)'
+      `EXPO_PUBLIC_API_URL not set. Using hosted backend at ${HOSTED_BACKEND_URL}. Set EXPO_PUBLIC_API_URL if you need a different endpoint (e.g., your local tunnel).`
     );
   }
 
@@ -108,7 +129,7 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       const isLocalhost = API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
       if (Platform.OS !== 'web' && isLocalhost) {
         throw new Error(
-          'Cannot connect to backend. On mobile devices, localhost won\'t work. Please set EXPO_PUBLIC_API_URL in your .env file to your hosted backend URL (e.g., https://snapsell-backend.onrender.com).'
+          `Cannot connect to backend. On mobile devices, localhost won't work. Please set EXPO_PUBLIC_API_URL in your .env file to a reachable backend (defaults to ${HOSTED_BACKEND_URL}).`
         );
       }
       throw new Error(
