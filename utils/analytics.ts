@@ -3,14 +3,14 @@ import PostHog from 'posthog-react-native';
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST;
 
-let posthogInitialized = false;
+let posthogInstance: PostHog | null = null;
 
 /**
  * Initialize PostHog analytics client
  * Should be called once in the app root layout
  */
-export async function initializePostHog(): Promise<void> {
-    if (posthogInitialized) {
+export function initializePostHog(): void {
+    if (posthogInstance) {
         return;
     }
 
@@ -20,11 +20,9 @@ export async function initializePostHog(): Promise<void> {
     }
 
     try {
-        await PostHog.initAsync(POSTHOG_API_KEY, {
+        posthogInstance = new PostHog(POSTHOG_API_KEY, {
             host: POSTHOG_HOST,
-            person_profiles: 'identified_only',
         });
-        posthogInitialized = true;
     } catch (error) {
         // Don't break the app if PostHog fails to initialize
         console.error('Failed to initialize PostHog:', error);
@@ -36,8 +34,8 @@ export async function initializePostHog(): Promise<void> {
  */
 export function trackEvent(eventName: string, properties?: Record<string, any>): void {
     try {
-        if (posthogInitialized) {
-            PostHog.capture(eventName, properties);
+        if (posthogInstance) {
+            posthogInstance.capture(eventName, properties);
         }
     } catch (error) {
         // Don't break the app if tracking fails
@@ -48,6 +46,6 @@ export function trackEvent(eventName: string, properties?: Record<string, any>):
 /**
  * Get the PostHog client instance (for advanced usage)
  */
-export function getPostHog(): typeof PostHog {
-    return PostHog;
+export function getPostHog(): PostHog | null {
+    return posthogInstance;
 }

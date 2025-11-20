@@ -48,21 +48,30 @@ app.add_middleware(
   allow_headers=["*"],
 )
 
-# Initialize PostHog client
-POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY")
-POSTHOG_HOST = os.getenv("POSTHOG_HOST")
+# Initialize PostHog client (non-blocking, fail gracefully)
+posthog = None
+try:
+  POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY")
+  POSTHOG_HOST = os.getenv("POSTHOG_HOST")
 
-if POSTHOG_API_KEY and POSTHOG_HOST:
-  try:
+  if POSTHOG_API_KEY and POSTHOG_HOST:
     posthog = Posthog(project_api_key=POSTHOG_API_KEY, host=POSTHOG_HOST)
-  except Exception as e:
-    print(f"Warning: Failed to initialize PostHog: {e}")
-    posthog = None
-else:
-  print("PostHog credentials not configured. Analytics will be disabled.")
+    print("PostHog initialized successfully.")
+  else:
+    print("PostHog credentials not configured. Analytics will be disabled.")
+except Exception as e:
+  # Don't let PostHog initialization failure break the server
+  print(f"Warning: Failed to initialize PostHog: {e}")
   posthog = None
 
-PROMPT_TEMPLATE = """You are SnapSell, an assistant that helps people list second-hand items.
+def _build_prompt_template(currency: Optional[str] = None) -> str:
+  currency_context = ""
+  if currency:
+    currency_context = f"\n- Estimate price in {currency} based on the item's condition, brand, age, and market value. Use realistic pricing appropriate for {currency} (e.g., a used chair might be 45-150 {currency}, a new phone might be 500-1200 {currency}). If you cannot reasonably estimate the price, return an empty string. Do NOT use placeholder values like 120."
+  else:
+    currency_context = "\n- Estimate price based on the item's condition, brand, age, and market value. Use realistic pricing (e.g., a used chair might be 45-150, a new phone might be 500-1200). If you cannot reasonably estimate the price, return an empty string. Do NOT use placeholder values like 120."
+
+  return f"""You are SnapSell, an assistant that helps people list second-hand items.
 Analyze the attached product photo and return ONLY valid JSON (no markdown, no code blocks, no explanations) matching this exact schema:
 {{
   "title": string,          // short, searchable product headline
@@ -73,8 +82,7 @@ Analyze the attached product photo and return ONLY valid JSON (no markdown, no c
 }}
 
 Rules:
-- Return ONLY the JSON object, nothing else. No markdown code blocks, no explanations, no text before or after.
-- Estimate price based on the item's condition, brand, age, and market value. Use realistic pricing (e.g., a used chair might be 45-150, a new phone might be 500-1200). If you cannot reasonably estimate the price, return an empty string. Do NOT use placeholder values like 120.
+- Return ONLY the JSON object, nothing else. No markdown code blocks, no explanations, no text before or after.{currency_context}
 - Keep description under 400 characters.
 - Prefer realistic consumer-friendly language.
 - If you cannot infer a field, return an empty string for that field.
@@ -115,17 +123,22 @@ async def analyze_image(
   image: UploadFile = File(...),
   provider: str = Form("azure"),
   model: Optional[str] = Form(None),
+  currency: Optional[str] = Form(None),
 ):
-  # Track API request
+  # Track API request (non-blocking)
   if posthog:
     try:
+      # Use flush=False to make it non-blocking
       posthog.capture(
         distinct_id="anonymous",
         event="api_analyze_requested",
         properties={"provider": provider},
       )
-    except Exception:
-      pass  # Don't break the API if tracking fails
+      # Flush in background without blocking
+      posthog.flush()
+    except Exception as e:
+      # Silently fail - don't log or break the API
+      pass
 
   if not image.content_type or not image.content_type.startswith("image/"):
     raise HTTPException(status_code=400, detail="Please upload an image file.")
@@ -138,15 +151,16 @@ async def analyze_image(
     temp_path = temp_file.name
 
   try:
+    prompt = _build_prompt_template(currency)
     response = llm_api.query_llm(
-      prompt=PROMPT_TEMPLATE,
+      prompt=prompt,
       provider=provider,
       model=model,
       image_path=temp_path,
     )
   except Exception as e:
     error_message = str(e)
-    # Track API error
+    # Track API error (non-blocking)
     if posthog:
       try:
         error_type = "quota" if "quota" in error_message.lower() or "insufficient_quota" in error_message.lower() else "authentication" if "api_key" in error_message.lower() or "authentication" in error_message.lower() else "other"
@@ -155,6 +169,7 @@ async def analyze_image(
           event="api_analyze_error",
           properties={"provider": provider, "error_type": error_type},
         )
+        posthog.flush()
       except Exception:
         pass  # Don't break the API if tracking fails
 
@@ -202,7 +217,7 @@ async def analyze_image(
 
   listing = _normalize_listing(parsed)
 
-  # Track API success
+  # Track API success (non-blocking)
   if posthog:
     try:
       posthog.capture(
@@ -210,6 +225,7 @@ async def analyze_image(
         event="api_analyze_success",
         properties={"provider": provider, "has_title": bool(listing.title)},
       )
+      posthog.flush()
     except Exception:
       pass  # Don't break the API if tracking fails
 

@@ -18,6 +18,7 @@ type AnalyzeOptions = {
   mimeType?: string;
   provider?: string;
   model?: string;
+  currency?: string;
   onStatusChange?: (message: string | null) => void;
 };
 
@@ -184,6 +185,7 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
     mimeType = 'image/jpeg',
     provider,
     model,
+    currency,
     onStatusChange,
   } = options;
 
@@ -225,6 +227,10 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
 
       if (model) {
         formData.append('model', model);
+      }
+
+      if (currency) {
+        formData.append('currency', currency);
       }
 
       // On React Native, don't set Content-Type header - let the system set it with boundary

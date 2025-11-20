@@ -77,10 +77,14 @@ export default function HomeScreen() {
     setErrorMessage(null);
 
     try {
+      const preferences = await loadPreferences();
+      const currency = preferences?.currency || '$';
+
       const listing = await analyzeItemPhoto({
         uri: asset.uri,
         filename: asset.fileName ?? 'snapsell-item.jpg',
         mimeType: asset.mimeType ?? 'image/jpeg',
+        currency,
         onStatusChange: setErrorMessage,
       });
 

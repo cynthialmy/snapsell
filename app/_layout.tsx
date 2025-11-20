@@ -12,7 +12,7 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
 
   useEffect(() => {
-    void initializePostHog();
+    initializePostHog();
   }, []);
 
   return (
