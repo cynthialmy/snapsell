@@ -99,9 +99,36 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+// Cute messages for Snappy the Otter
+const WARMUP_MESSAGES = [
+  'Snappy is napping. Waking him up...',
+  'Snappy is stretching his paws...',
+  'Snappy is brewing some coffee...',
+  'Snappy is rubbing the sleep from his eyes...',
+  'Snappy is doing his morning stretches...',
+  'Snappy is getting ready for you...',
+  'Snappy is warming up his otter engine...',
+];
+
+const TIMEOUT_MESSAGES = [
+  "Snappy couldn't wake up because he partied too hard last night...",
+  'Snappy is still snoozing. Give him a moment...',
+  "Snappy is taking a longer nap than expected...",
+  "Snappy is having a deep sleep. Let's try again...",
+  "Snappy is dreaming about fish. We'll wake him up...",
+  "Snappy is in a deep slumber. One more try...",
+];
+
+function getRandomWarmupMessage(): string {
+  return WARMUP_MESSAGES[Math.floor(Math.random() * WARMUP_MESSAGES.length)];
+}
+
+function getRandomTimeoutMessage(): string {
+  return TIMEOUT_MESSAGES[Math.floor(Math.random() * TIMEOUT_MESSAGES.length)];
+}
+
 const REQUEST_TIMEOUT_MS = 20_000;
 const TIMEOUT_RETRY_DELAY_MS = 2_000;
-const WARMUP_STATUS_MESSAGE = 'Warming up backend, retrying…';
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
@@ -239,8 +266,9 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       return json;
     } catch (error) {
       if (isAbortError(error)) {
-        lastError = new Error('Request timed out before the backend responded.');
-        onStatusChange?.(WARMUP_STATUS_MESSAGE);
+        const timeoutMessage = getRandomTimeoutMessage();
+        lastError = new Error(timeoutMessage);
+        onStatusChange?.(getRandomWarmupMessage());
 
         if (attempt < maxAttempts) {
           await delay(TIMEOUT_RETRY_DELAY_MS);
@@ -272,14 +300,11 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
         const isLocalhost = API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
         if (Platform.OS !== 'web' && isLocalhost) {
           throw new Error(
-            `Cannot connect to backend. On mobile devices, localhost won't work. Please set EXPO_PUBLIC_API_URL in your .env file to a reachable backend (defaults to ${HOSTED_BACKEND_URL}).`
+            "Snappy can't find the server on your phone. Please check your settings or try again later."
           );
         }
         throw new Error(
-          `Network request failed. Cannot connect to backend at ${API_URL}. Please check:\n\n` +
-          '1. Your internet connection\n' +
-          '2. The backend server is running and accessible\n' +
-          '3. EXPO_PUBLIC_API_URL is set correctly in your .env file'
+          "Snappy can't reach the server right now. Check your internet connection and try again."
         );
       }
       throw lastError;
@@ -287,5 +312,5 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
   }
 
   // This should never be reached, but TypeScript needs it
-  throw lastError || new Error('Failed to analyze photo after multiple attempts.');
+  throw lastError || new Error("Snappy tried his best but couldn't process the photo. Please try again.");
 }

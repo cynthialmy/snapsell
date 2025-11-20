@@ -22,6 +22,43 @@ import { formatListingText } from '@/utils/listingFormatter';
 import { deleteListing, loadListings, saveListing, type SavedListing } from '@/utils/listings';
 import { loadPreferences } from '@/utils/preferences';
 
+// Transform technical error messages to cute Snappy messages
+function transformErrorMessage(message: string): string {
+  const lowerMessage = message.toLowerCase();
+
+  // Check for technical terms and replace with cute messages
+  if (lowerMessage.includes('timed out') || lowerMessage.includes('timeout')) {
+    const cuteMessages = [
+      "Snappy couldn't wake up because he partied too hard last night...",
+      'Snappy is still snoozing. Give him a moment...',
+      "Snappy is taking a longer nap than expected...",
+      "Snappy is having a deep sleep. Let's try again...",
+    ];
+    return cuteMessages[Math.floor(Math.random() * cuteMessages.length)];
+  }
+
+  if (lowerMessage.includes('warming') || lowerMessage.includes('warmup')) {
+    const cuteMessages = [
+      'Snappy is napping. Waking him up...',
+      'Snappy is stretching his paws...',
+      'Snappy is brewing some coffee...',
+    ];
+    return cuteMessages[Math.floor(Math.random() * cuteMessages.length)];
+  }
+
+  if (lowerMessage.includes('network') || lowerMessage.includes('connection') || lowerMessage.includes('failed to connect')) {
+    return "Snappy can't reach the server right now. Let's try again in a moment...";
+  }
+
+  // If it's already a cute message (contains "Snappy"), return as-is
+  if (lowerMessage.includes('snappy')) {
+    return message;
+  }
+
+  // For other errors, return as-is (they might already be user-friendly)
+  return message;
+}
+
 export default function HomeScreen() {
   const router = useRouter();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -48,9 +85,8 @@ export default function HomeScreen() {
 
       navigateToPreview({ listing, imageUri: asset.uri });
     } catch (error) {
-      setErrorMessage(
-        error instanceof Error ? error.message : 'Something went wrong. Please try again.',
-      );
+      const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+      setErrorMessage(transformErrorMessage(rawMessage));
     } finally {
       setIsAnalyzing(false);
     }
@@ -291,6 +327,22 @@ export default function HomeScreen() {
               </Text>
             </View>
           </View>
+
+          <View style={styles.ctaSection}>
+            <Pressable
+              accessibilityRole="button"
+              onPress={handlePickImage}
+              style={({ pressed }) => [
+                styles.primaryButton,
+                pressed && !isAnalyzing ? styles.primaryButtonPressed : null,
+              ]}
+              disabled={isAnalyzing}>
+              <Text style={styles.primaryButtonText}>{ctaLabel}</Text>
+            </Pressable>
+
+            {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+          </View>
+
           {previousListings.length > 0 ? (
             <>
               <Text style={styles.previousListingsHeader}>Previous listings</Text>
@@ -352,22 +404,6 @@ export default function HomeScreen() {
             </View>
           )}
         </View>
-
-        <View style={styles.ctaSection}>
-          <Pressable
-            accessibilityRole="button"
-            onPress={handlePickImage}
-            style={({ pressed }) => [
-              styles.primaryButton,
-              pressed && !isAnalyzing ? styles.primaryButtonPressed : null,
-            ]}
-            disabled={isAnalyzing}>
-            <Text style={styles.primaryButtonText}>{ctaLabel}</Text>
-          </Pressable>
-
-          {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-
-        </View>
       </ScrollView>
       <SnappyLoading visible={isAnalyzing} />
     </SafeAreaView>
@@ -416,8 +452,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   error: {
-    color: '#DC2626',
-    fontSize: 14,
+    color: '#D97706',
+    fontSize: 15,
+    fontFamily: Platform.select({
+      ios: 'MarkerFelt-Wide',
+      android: 'casual',
+      default: 'Comic Sans MS',
+    }),
+    lineHeight: 20,
   },
   steps: {
     marginTop: 8,
