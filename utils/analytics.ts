@@ -22,6 +22,15 @@ export function initializePostHog(): void {
     try {
         posthogInstance = new PostHog(POSTHOG_API_KEY, {
             host: POSTHOG_HOST,
+            // Enable session recording for all platforms (web, iOS, Android)
+            enableSessionReplay: true,
+            // Enable console log capture for web (React Native SDK handles platform differences)
+            enable_recording_console_log: true,
+            // Configure session replay settings including console log capture
+            sessionReplayConfig: {
+                // Enable capturing of console logs (Android: logcat, iOS/Web: console logs)
+                captureLog: true,
+            },
         });
     } catch (error) {
         // Don't break the app if PostHog fails to initialize
