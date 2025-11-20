@@ -17,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SnappyLoading } from '@/components/snappy-loading';
+import { trackEvent } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { deleteListing, loadListings, saveListing, type SavedListing } from '@/utils/listings';
@@ -81,6 +82,13 @@ export default function HomeScreen() {
         filename: asset.fileName ?? 'snapsell-item.jpg',
         mimeType: asset.mimeType ?? 'image/jpeg',
         onStatusChange: setErrorMessage,
+      });
+
+      // Track successful listing generation
+      trackEvent('listing_generated', {
+        has_title: !!listing.title,
+        has_price: !!listing.price,
+        condition: listing.condition || '',
       });
 
       navigateToPreview({ listing, imageUri: asset.uri });
@@ -148,6 +156,7 @@ export default function HomeScreen() {
 
       const asset = result.assets[0];
       await savePhotoToLibrary(asset);
+      trackEvent('photo_uploaded', { source: 'camera' });
       await processImage(asset);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -186,6 +195,7 @@ export default function HomeScreen() {
     }
 
     const asset = result.assets[0];
+    trackEvent('photo_uploaded', { source: 'library' });
     await processImage(asset);
   };
 
@@ -269,6 +279,7 @@ export default function HomeScreen() {
       currency: savedListing.currency,
     });
     await Clipboard.setStringAsync(listingText);
+    trackEvent('listing_copied', { source: 'home' });
     setCopySuccessId(savedListing.id);
     setTimeout(() => setCopySuccessId(null), 2000);
   };
@@ -299,6 +310,7 @@ export default function HomeScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            trackEvent('listing_deleted', { listing_id: savedListing.id });
             await deleteListing(savedListing.id);
             await loadPreviousListings();
           },

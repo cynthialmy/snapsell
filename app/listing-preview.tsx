@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { trackEvent } from '@/utils/analytics';
 import type { ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
@@ -143,6 +144,7 @@ export default function ListingPreviewScreen() {
 
   const handleCopy = async () => {
     await Clipboard.setStringAsync(previewText);
+    trackEvent('listing_copied', { source: 'preview' });
     setCopySuccess(true);
   };
 

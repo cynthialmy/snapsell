@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from posthog import Posthog
 
 from tools import llm_api
 
@@ -46,6 +47,20 @@ app.add_middleware(
   allow_methods=["*"],
   allow_headers=["*"],
 )
+
+# Initialize PostHog client
+POSTHOG_API_KEY = os.getenv("POSTHOG_API_KEY")
+POSTHOG_HOST = os.getenv("POSTHOG_HOST")
+
+if POSTHOG_API_KEY and POSTHOG_HOST:
+  try:
+    posthog = Posthog(project_api_key=POSTHOG_API_KEY, host=POSTHOG_HOST)
+  except Exception as e:
+    print(f"Warning: Failed to initialize PostHog: {e}")
+    posthog = None
+else:
+  print("PostHog credentials not configured. Analytics will be disabled.")
+  posthog = None
 
 PROMPT_TEMPLATE = """You are SnapSell, an assistant that helps people list second-hand items.
 Analyze the attached product photo and return ONLY valid JSON (no markdown, no code blocks, no explanations) matching this exact schema:
@@ -101,6 +116,17 @@ async def analyze_image(
   provider: str = Form("azure"),
   model: Optional[str] = Form(None),
 ):
+  # Track API request
+  if posthog:
+    try:
+      posthog.capture(
+        distinct_id="anonymous",
+        event="api_analyze_requested",
+        properties={"provider": provider},
+      )
+    except Exception:
+      pass  # Don't break the API if tracking fails
+
   if not image.content_type or not image.content_type.startswith("image/"):
     raise HTTPException(status_code=400, detail="Please upload an image file.")
 
@@ -120,6 +146,18 @@ async def analyze_image(
     )
   except Exception as e:
     error_message = str(e)
+    # Track API error
+    if posthog:
+      try:
+        error_type = "quota" if "quota" in error_message.lower() or "insufficient_quota" in error_message.lower() else "authentication" if "api_key" in error_message.lower() or "authentication" in error_message.lower() else "other"
+        posthog.capture(
+          distinct_id="anonymous",
+          event="api_analyze_error",
+          properties={"provider": provider, "error_type": error_type},
+        )
+      except Exception:
+        pass  # Don't break the API if tracking fails
+
     # Provide user-friendly error messages for common issues
     if "quota" in error_message.lower() or "insufficient_quota" in error_message.lower():
       detail = f"API quota exceeded. Please check your {provider} account billing and usage limits. Error: {error_message}"
@@ -163,6 +201,18 @@ async def analyze_image(
     ) from exc
 
   listing = _normalize_listing(parsed)
+
+  # Track API success
+  if posthog:
+    try:
+      posthog.capture(
+        distinct_id="anonymous",
+        event="api_analyze_success",
+        properties={"provider": provider, "has_title": bool(listing.title)},
+      )
+    except Exception:
+      pass  # Don't break the API if tracking fails
+
   return listing
 
 

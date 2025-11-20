@@ -47,6 +47,12 @@ EXPO_PUBLIC_ALLOW_DEVICE_LOCALHOST=false
 OPENAI_API_KEY=sk-...
 OPENAI_MODEL_DEPLOYMENT=gpt-4o
 # Optional: SNAPSELL_ALLOWED_ORIGINS=http://localhost:8081,http://localhost:5173
+
+# PostHog Analytics (optional)
+EXPO_PUBLIC_POSTHOG_API_KEY=your_posthog_api_key_here
+EXPO_PUBLIC_POSTHOG_HOST=https://us.i.posthog.com
+POSTHOG_API_KEY=your_posthog_api_key_here
+POSTHOG_HOST=https://us.i.posthog.com
 ```
 
 **Important for mobile devices:** The app now defaults to the hosted backend (`https://snapsell-backend.onrender.com`) whenever it detects it's running on a physical device and `EXPO_PUBLIC_API_URL` is unset or points to `localhost`. This guarantees that Expo Go / TestFlight builds can reach an accessible server out of the box.
@@ -61,3 +67,5 @@ EXPO_PUBLIC_ALLOW_DEVICE_LOCALHOST=true
 Setting `EXPO_PUBLIC_ALLOW_DEVICE_LOCALHOST=true` opts you back into whatever URL you configured, even if it contains `localhost`. Without that flag, physical devices automatically fall back to the hosted backend.
 
 These values are loaded both by the Expo app (for the API base URL) and the FastAPI backend via `python-dotenv`.
+
+**PostHog Analytics:** The app includes PostHog analytics to track user engagement and activation events. Configure PostHog credentials in your `.env` file. If not configured, analytics will be disabled. Events tracked include photo uploads, listing generation, copy actions, and API usage.
