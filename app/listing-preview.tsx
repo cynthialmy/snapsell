@@ -27,13 +27,9 @@ type PreviewPayload = {
   imageUri: string;
 };
 
-const CONDITION_OPTIONS = [
-  'New',
-  'Used - Like New',
-  'Used - Good',
-  'Used - Fair',
-  'Refurbished',
-];
+const CONDITION_OPTIONS = ['New', 'Used - Like New', 'Used - Good', 'Used - Fair', 'Refurbished'];
+
+const CURRENCY_OPTIONS = ['$', '€', '£', 'kr', '¥'];
 
 export default function ListingPreviewScreen() {
   const router = useRouter();
@@ -51,7 +47,6 @@ export default function ListingPreviewScreen() {
   const listing = payload?.listing;
 
   const [title, setTitle] = useState(listing?.title ?? '');
-  const [brand, setBrand] = useState(listing?.brand ?? '');
   const [price, setPrice] = useState(listing?.price ?? '');
   const [description, setDescription] = useState(listing?.description ?? '');
   const [condition, setCondition] = useState(() => {
@@ -68,13 +63,13 @@ export default function ListingPreviewScreen() {
   const [copySuccess, setCopySuccess] = useState(false);
   const [isLocating, setIsLocating] = useState(false);
   const [showConditionModal, setShowConditionModal] = useState(false);
+  const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false);
   const [currency, setCurrency] = useState<string>('$');
 
   const previewText = useMemo(
     () =>
       formatListingText({
         title,
-        brand,
         price,
         description,
         condition,
@@ -84,7 +79,7 @@ export default function ListingPreviewScreen() {
         pickupNotes,
         currency,
       }),
-    [title, brand, price, description, condition, location, pickupAvailable, shippingAvailable, pickupNotes, currency],
+    [title, price, description, condition, location, pickupAvailable, shippingAvailable, pickupNotes, currency],
   );
 
   useEffect(() => {
@@ -204,6 +199,9 @@ export default function ListingPreviewScreen() {
             if (showConditionModal) {
               setShowConditionModal(false);
             }
+            if (showCurrencyDropdown) {
+              setShowCurrencyDropdown(false);
+            }
           }}>
           <Text style={styles.eyebrow}>Listing preview</Text>
           <Text style={styles.header}>Tweak anything, then copy the finished block.</Text>
@@ -226,35 +224,53 @@ export default function ListingPreviewScreen() {
                 style={styles.input}
                 placeholder="e.g. Mid-century oak chair"
               />
-            </Field>
-
-            <Field label="Brand (optional)">
-              <TextInput
-                value={brand}
-                onChangeText={text => {
-                  setBrand(text);
-                  setCopySuccess(false);
-                }}
-                style={styles.input}
-                placeholder="e.g. IKEA"
-              />
+              <Text style={styles.helperText}>🦦 Adding brand info in the title boosts trust.</Text>
             </Field>
 
             <View style={styles.row}>
               <Field label="Price" style={styles.flex}>
                 <View style={styles.priceRow}>
-                  <View style={styles.currencySelector}>
+                  <View style={[styles.currencySelector, styles.dropdownContainer]}>
                     <Pressable
                       onPress={() => {
-                        const currencies = ['$', '€', '£', 'kr', '¥'];
-                        const currentIndex = currencies.indexOf(currency);
-                        const nextIndex = (currentIndex + 1) % currencies.length;
-                        setCurrency(currencies[nextIndex]);
-                        setCopySuccess(false);
+                        setShowCurrencyDropdown(!showCurrencyDropdown);
+                        setShowConditionModal(false);
                       }}
                       style={styles.currencyButton}>
                       <Text style={styles.currencyButtonText}>{currency}</Text>
+                      <Text style={styles.currencyButtonArrow}>{showCurrencyDropdown ? '▲' : '▼'}</Text>
                     </Pressable>
+                    {showCurrencyDropdown && (
+                      <View style={[styles.dropdown, styles.currencyDropdown]}>
+                        <ScrollView
+                          style={styles.dropdownScroll}
+                          nestedScrollEnabled
+                          showsVerticalScrollIndicator>
+                          {CURRENCY_OPTIONS.map(option => (
+                            <TouchableOpacity
+                              key={option}
+                              onPress={() => {
+                                setCurrency(option);
+                                setCopySuccess(false);
+                                setShowCurrencyDropdown(false);
+                              }}
+                              style={[
+                                styles.dropdownOption,
+                                currency === option && styles.dropdownOptionSelected,
+                              ]}>
+                              <Text
+                                style={[
+                                  styles.dropdownOptionText,
+                                  currency === option && styles.dropdownOptionTextSelected,
+                                ]}>
+                                {option}
+                              </Text>
+                              {currency === option && <Text style={styles.dropdownOptionCheck}>✓</Text>}
+                            </TouchableOpacity>
+                          ))}
+                        </ScrollView>
+                      </View>
+                    )}
                   </View>
                   <TextInput
                     value={price}
@@ -271,7 +287,10 @@ export default function ListingPreviewScreen() {
               <Field label="Condition" style={styles.flex}>
                 <View style={styles.dropdownContainer}>
                   <Pressable
-                    onPress={() => setShowConditionModal(!showConditionModal)}
+                    onPress={() => {
+                      setShowConditionModal(!showConditionModal);
+                      setShowCurrencyDropdown(false);
+                    }}
                     style={styles.conditionButton}>
                     <Text style={styles.conditionButtonText}>{condition}</Text>
                     <Text style={styles.conditionButtonArrow}>
@@ -481,6 +500,11 @@ const styles = StyleSheet.create({
     color: '#475569',
     fontWeight: '600',
   },
+  helperText: {
+    fontSize: 13,
+    color: '#64748B',
+    marginTop: -4,
+  },
   input: {
     borderWidth: 1,
     borderColor: '#E2E8F0',
@@ -585,7 +609,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   currencySelector: {
-    minWidth: 50,
+    minWidth: 60,
   },
   currencyButton: {
     borderWidth: 1,
@@ -594,13 +618,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
     backgroundColor: '#F8FAFC',
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
   },
   currencyButtonText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#0F172A',
+  },
+  currencyButtonArrow: {
+    fontSize: 12,
+    color: '#64748B',
+  },
+  currencyDropdown: {
+    zIndex: 1000,
+    width: 140,
   },
   priceInput: {
     flex: 1,
@@ -658,22 +692,34 @@ const styles = StyleSheet.create({
   },
   previewCard: {
     marginTop: 8,
-    backgroundColor: '#0F172A',
-    borderRadius: 16,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 14,
     padding: 20,
     gap: 8,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    shadowColor: '#93C5FD',
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   previewTitle: {
-    color: '#A5B4FC',
-    fontSize: 14,
+    color: '#0369A1',
+    fontSize: 13,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
-    fontWeight: '600',
+    fontWeight: '700',
   },
   previewContent: {
-    color: '#F8FAFC',
+    color: '#1F2937',
     fontSize: 16,
     lineHeight: 22,
+    fontFamily: Platform.select({
+      ios: 'MarkerFelt-Wide',
+      android: 'casual',
+      default: 'Comic Sans MS',
+    }),
   },
   copyButton: {
     backgroundColor: '#0F172A',

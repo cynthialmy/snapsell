@@ -10,15 +10,11 @@ export function formatListingText(listing: ListingData & { currency?: string }):
   }
 
   const metadata: string[] = [];
-  const brand = trim(listing.brand);
   const price = trim(listing.price);
   const condition = trim(listing.condition);
   const location = trim(listing.location);
   const currency = listing.currency || '$';
 
-  if (brand) {
-    metadata.push(`Brand: ${brand}`);
-  }
   if (price) {
     // Format price with currency
     const formattedPrice = currency === 'kr' || currency === '¥'

@@ -1,5 +1,5 @@
-import { Image } from 'expo-image';
-import * as ImagePicker from 'expo-image-picker';
+git aimport * as ImagePicker from 'expo-image-picker';
+import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
 import {
@@ -21,7 +21,6 @@ import { formatListingText } from '@/utils/listingFormatter';
 export default function HomeScreen() {
   const router = useRouter();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [lastImageUri, setLastImageUri] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const ctaLabel = useMemo(
@@ -30,14 +29,15 @@ export default function HomeScreen() {
   );
 
   const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
-    setLastImageUri(asset.uri);
     setIsAnalyzing(true);
+    setErrorMessage(null);
 
     try {
       const listing = await analyzeItemPhoto({
         uri: asset.uri,
         filename: asset.fileName ?? 'snapsell-item.jpg',
         mimeType: asset.mimeType ?? 'image/jpeg',
+        onStatusChange: setErrorMessage,
       });
 
       navigateToPreview({ listing, imageUri: asset.uri });
@@ -47,6 +47,34 @@ export default function HomeScreen() {
       );
     } finally {
       setIsAnalyzing(false);
+    }
+  };
+
+  const savePhotoToLibrary = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    try {
+      const initialPermission = await MediaLibrary.getPermissionsAsync();
+      let permissionStatus = initialPermission;
+
+      if (!initialPermission.granted) {
+        if (!initialPermission.canAskAgain) {
+          setErrorMessage('Please allow SnapSell to save photos so Snappy can reuse them later.');
+          return;
+        }
+        permissionStatus = await MediaLibrary.requestPermissionsAsync();
+      }
+
+      if (!permissionStatus.granted) {
+        setErrorMessage('Please allow SnapSell to save photos so Snappy can reuse them later.');
+        return;
+      }
+
+      await MediaLibrary.saveToLibraryAsync(asset.uri);
+    } catch (error) {
+      setErrorMessage('Snappy could not save that photo to your library, but the listing still works.');
     }
   };
 
@@ -77,6 +105,7 @@ export default function HomeScreen() {
       }
 
       const asset = result.assets[0];
+      await savePhotoToLibrary(asset);
       await processImage(asset);
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -155,8 +184,7 @@ export default function HomeScreen() {
   };
 
   const sampleListing: ListingData = {
-    title: 'Mid-century oak chair',
-    brand: 'IKEA',
+    title: 'IKEA mid-century oak chair',
     price: '85',
     condition: 'Used - Good',
     location: 'Oslo, Norway',
@@ -178,46 +206,39 @@ export default function HomeScreen() {
         <Text style={styles.eyebrow}>SNAPSELL</Text>
         <Text style={styles.title}>Turn a single photo into a ready-to-post listing.</Text>
 
-        <Pressable
-          accessibilityRole="button"
-          onPress={handlePickImage}
-          style={({ pressed }) => [
-            styles.primaryButton,
-            pressed && !isAnalyzing ? styles.primaryButtonPressed : null,
-          ]}
-          disabled={isAnalyzing}>
-          <Text style={styles.primaryButtonText}>{ctaLabel}</Text>
-        </Pressable>
-
-        {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-
-        {lastImageUri ? (
-          <View style={styles.previewCard}>
-            <Image source={{ uri: lastImageUri }} contentFit="cover" style={styles.previewImage} />
-            <Text style={styles.previewHint}>
-              Preview of your last upload. Snap another item anytime.
-            </Text>
-          </View>
-        ) : null}
-
         <View style={styles.steps}>
-          <Text style={styles.stepsTitle}>How it works</Text>
-          {['Snap / upload photo', 'AI drafts the listing', 'Copy & paste anywhere'].map(
-            (step, idx) => (
-              <View key={step}>
-                <View style={styles.stepItem}>
-                  <Text style={styles.stepNumber}>{idx + 1}</Text>
-                  <Text style={styles.stepLabel}>{step}</Text>
-                </View>
-                {idx === 1 && (
-                  <View style={styles.samplePreviewCard}>
-                    <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
-                    <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
-                  </View>
-                )}
-              </View>
-            ),
-          )}
+          <View style={styles.mascotCard}>
+            <View style={styles.mascotAvatar}>
+              <Text style={styles.mascotAvatarText}>🦦</Text>
+            </View>
+            <View style={styles.mascotBubble}>
+              <Text style={styles.mascotIntro}>Snappy the Otter</Text>
+              <Text style={styles.mascotText}>
+                Give me a single photo and I will save it for you, narrate what I see, and hand back a
+                listing you can paste anywhere.
+              </Text>
+            </View>
+          </View>
+          <View style={styles.samplePreviewCard}>
+            <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
+            <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
+          </View>
+        </View>
+
+        <View style={styles.ctaSection}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={handlePickImage}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && !isAnalyzing ? styles.primaryButtonPressed : null,
+            ]}
+            disabled={isAnalyzing}>
+            <Text style={styles.primaryButtonText}>{ctaLabel}</Text>
+          </Pressable>
+
+          {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
+
         </View>
       </ScrollView>
       <SnappyLoading visible={isAnalyzing} />
@@ -270,66 +291,23 @@ const styles = StyleSheet.create({
     color: '#DC2626',
     fontSize: 14,
   },
-  previewCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 16,
-    padding: 16,
-    shadowColor: '#0F172A',
-    shadowOpacity: 0.08,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 3,
-    gap: 12,
-  },
-  previewImage: {
-    width: '100%',
-    height: 220,
-    borderRadius: 12,
-  },
-  previewHint: {
-    color: '#64748B',
-    fontSize: 13,
-  },
   steps: {
     marginTop: 8,
     gap: 12,
   },
-  stepsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#0F172A',
-  },
-  stepItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    padding: 14,
-  },
-  stepNumber: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#EEF2FF',
-    color: '#4338CA',
-    textAlign: 'center',
-    fontWeight: '700',
-    lineHeight: 28,
-  },
-  stepLabel: {
-    fontSize: 15,
-    color: '#0F172A',
-    fontWeight: '500',
-  },
   samplePreviewCard: {
-    backgroundColor: '#F8F9FA',
-    borderRadius: 12,
-    padding: 16,
+    backgroundColor: '#EFF6FF',
+    borderRadius: 14,
+    padding: 18,
     marginTop: 8,
-    marginLeft: 40,
+    alignSelf: 'stretch',
     borderWidth: 1,
-    borderColor: '#E5E7EB',
+    borderColor: '#BFDBFE',
+    shadowColor: '#93C5FD',
+    shadowOpacity: 0.25,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 2,
   },
   samplePreviewLabel: {
     fontSize: 12,
@@ -340,9 +318,53 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   samplePreviewText: {
+    fontSize: 15,
+    color: '#1F2937',
+    lineHeight: 22,
+    fontFamily: Platform.select({
+      ios: 'MarkerFelt-Wide',
+      android: 'casual',
+      default: 'Comic Sans MS',
+    }),
+  },
+  mascotCard: {
+    flexDirection: 'row',
+    gap: 12,
+    backgroundColor: '#E0F2FE',
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#BAE6FD',
+  },
+  mascotAvatar: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    backgroundColor: '#0EA5E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mascotAvatarText: {
+    color: '#FFFFFF',
+    fontWeight: '700',
+    fontSize: 32,
+  },
+  mascotBubble: {
+    flex: 1,
+    gap: 4,
+  },
+  mascotIntro: {
+    fontSize: 12,
+    color: '#0369A1',
+    fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  mascotText: {
     fontSize: 14,
     color: '#0F172A',
     lineHeight: 20,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+  },
+  ctaSection: {
+    gap: 12,
   },
 });

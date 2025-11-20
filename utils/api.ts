@@ -18,6 +18,7 @@ type AnalyzeOptions = {
   mimeType?: string;
   provider?: string;
   model?: string;
+  onStatusChange?: (message: string | null) => void;
 };
 
 const HOSTED_BACKEND_URL = 'https://snapsell-backend.onrender.com';
@@ -98,12 +99,72 @@ function delay(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+const REQUEST_TIMEOUT_MS = 20_000;
+const TIMEOUT_RETRY_DELAY_MS = 2_000;
+const WARMUP_STATUS_MESSAGE = 'Warming up backend, retrying…';
+
+async function fetchWithTimeout(
+  input: RequestInfo | URL,
+  init: RequestInit & { timeoutMs?: number } = {},
+): Promise<Response> {
+  const { timeoutMs = REQUEST_TIMEOUT_MS, signal, ...rest } = init;
+  const controller = new AbortController();
+
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, timeoutMs);
+
+  const cleanup = () => {
+    clearTimeout(timeoutId);
+  };
+
+  if (signal) {
+    if (signal.aborted) {
+      cleanup();
+      controller.abort();
+    } else {
+      signal.addEventListener('abort', () => controller.abort(), { once: true });
+    }
+  }
+
+  try {
+    return await fetch(input, {
+      ...rest,
+      signal: controller.signal,
+    });
+  } finally {
+    cleanup();
+  }
+}
+
+function isAbortError(error: unknown): boolean {
+  if (!error) {
+    return false;
+  }
+  if (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError') {
+    return true;
+  }
+  if (error instanceof Error) {
+    return error.name === 'AbortError' || error.message.toLowerCase().includes('aborted');
+  }
+  return false;
+}
+
 export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<ListingData> {
-  const { uri, filename = 'snapsell-item.jpg', mimeType = 'image/jpeg', provider, model } = options;
+  const {
+    uri,
+    filename = 'snapsell-item.jpg',
+    mimeType = 'image/jpeg',
+    provider,
+    model,
+    onStatusChange,
+  } = options;
 
   const maxAttempts = 3; // 1 initial + 2 retries
   let lastError: Error | null = null;
   let lastResponse: Response | undefined = undefined;
+
+  onStatusChange?.(null);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
@@ -149,10 +210,11 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
         // FormData will be handled automatically by fetch on web
       }
 
-      const response = await fetch(`${API_URL}/api/analyze-image`, {
+      const response = await fetchWithTimeout(`${API_URL}/api/analyze-image`, {
         method: 'POST',
         body: formData,
         headers,
+        timeoutMs: REQUEST_TIMEOUT_MS,
       });
 
       lastResponse = response;
@@ -173,8 +235,21 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       }
 
       const json = (await response.json()) as ListingData;
+      onStatusChange?.(null);
       return json;
     } catch (error) {
+      if (isAbortError(error)) {
+        lastError = new Error('Request timed out before the backend responded.');
+        onStatusChange?.(WARMUP_STATUS_MESSAGE);
+
+        if (attempt < maxAttempts) {
+          await delay(TIMEOUT_RETRY_DELAY_MS);
+          continue;
+        }
+
+        throw lastError;
+      }
+
       lastError = error instanceof Error ? error : new Error(String(error));
 
       // Check if this error is retryable
