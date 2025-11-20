@@ -1,4 +1,4 @@
-git aimport * as ImagePicker from 'expo-image-picker';
+import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { useRouter } from 'expo-router';
 import { useMemo, useState } from 'react';
@@ -219,10 +219,10 @@ export default function HomeScreen() {
               </Text>
             </View>
           </View>
-          <View style={styles.samplePreviewCard}>
-            <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
-            <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
-          </View>
+                <View style={styles.samplePreviewCard}>
+                  <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
+                  <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
+                </View>
         </View>
 
         <View style={styles.ctaSection}>
