@@ -69,3 +69,64 @@ Setting `EXPO_PUBLIC_ALLOW_DEVICE_LOCALHOST=true` opts you back into whatever UR
 These values are loaded both by the Expo app (for the API base URL) and the FastAPI backend via `python-dotenv`.
 
 **PostHog Analytics:** The app includes PostHog analytics to track user engagement and activation events. Configure PostHog credentials in your `.env` file. If not configured, analytics will be disabled. Events tracked include photo uploads, listing generation, copy actions, and API usage.
+
+**For EAS Production Builds:** When building with EAS (Expo Application Services), you must configure PostHog environment variables as EAS secrets. Set them using:
+
+```bash
+eas secret:create --scope project --name EXPO_PUBLIC_POSTHOG_API_KEY --value your_posthog_api_key_here
+eas secret:create --scope project --name EXPO_PUBLIC_POSTHOG_HOST --value https://us.i.posthog.com
+```
+
+Alternatively, you can set them in the EAS dashboard under your project's secrets. These variables are automatically included in production builds. The PostHog SDK is configured with `flushAt: 1` and `flushInterval: 10000ms` to ensure events are sent immediately on production builds.
+
+**Debug Mode:** To enable verbose PostHog logging, set `EXPO_PUBLIC_POSTHOG_DEBUG=true` in your environment variables (useful for troubleshooting).
+
+## Running on Physical iOS Device
+
+When running on a physical iPhone device using `npx expo run:ios --device`, you may encounter an issue where the app installs but shows "no development servers" when opened. This happens when the device cannot connect to the Metro bundler.
+
+### Solution 1: Use Tunnel Mode (Recommended)
+
+Tunnel mode works even if your devices aren't on the same network:
+
+1. In one terminal, start Metro with tunnel mode:
+```bash
+npx expo start --tunnel
+```
+
+2. In another terminal, build and install the app:
+```bash
+npx expo run:ios --device
+```
+
+The app will automatically connect to Metro through the tunnel.
+
+### Solution 2: Ensure Same Network Connection
+
+If you prefer using LAN mode (faster, but requires same network):
+
+1. **Verify both devices are on the same WiFi network** - Your Mac and iPhone must be connected to the same WiFi network.
+
+2. **Check Mac firewall settings** - macOS Firewall may be blocking port 8081:
+   - Go to System Settings → Network → Firewall
+   - Temporarily disable firewall or add an exception for Node/Metro
+
+3. **Start Metro with LAN mode explicitly**:
+```bash
+npx expo start --lan
+```
+
+4. Then build and install:
+```bash
+npx expo run:ios --device
+```
+
+### Solution 3: Manual Connection
+
+If the automatic connection fails, you can manually enter the Metro URL in the Expo development client:
+
+1. Start Metro: `npx expo start`
+2. Note the URL shown (e.g., `http://192.168.1.90:8081`)
+3. In the Expo dev client on your phone, tap "Enter URL manually" and enter the Metro URL
+
+**Note:** The `app.json` and `eas.json` configurations are correct and don't need changes for device connectivity. The issue is purely network-related between your device and the Metro bundler.

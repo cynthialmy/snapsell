@@ -101,3 +101,33 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 - When searching for recent news, use the current year (2025) instead of previous years, or simply use the "recent" keyword to get the latest information
 
 # Scratchpad
+
+## Fix iOS Physical Device Development Server Connection Issue (2025-01-XX)
+
+**Problem:** When running `npx expo run:ios --device`, the app installs but shows "no development servers" error. Metro bundler is running at `http://192.168.1.90:8081` but device can't connect.
+
+**Root Cause:** Network connectivity issue - device and Mac may not be on same WiFi, firewall blocking port 8081, or IP address mismatch.
+
+**Solution:** Use tunnel mode (`npx expo start --tunnel`) which works regardless of network configuration. Alternative: ensure same WiFi network and check firewall settings.
+
+**Documentation:** Added troubleshooting section to README.md with three solutions (tunnel mode, same network, manual connection).
+
+## Fix PostHog iOS Production Build Issue (2025-01-XX)
+
+**Problem:** PostHog events worked in simulator but not on iOS production/internal distribution builds.
+
+**Root Cause:** Missing flush configuration (`flushAt`, `flushInterval`) and flush only called on iOS, not all platforms.
+
+**Solution Implemented:**
+- Added `flushAt: 1` to force immediate event sending (no batching)
+- Added `flushInterval: 10000ms` as fallback to ensure events are sent
+- Changed flush to be called on all platforms, not just iOS
+- Enhanced error handling with detailed logging (without exposing secrets)
+- Added configuration status logging to help debug initialization issues
+- Updated README with EAS build configuration instructions
+
+**Key Changes:**
+- `utils/analytics.ts`: Updated PostHog initialization with proper flush config and improved error handling
+- `README.md`: Added EAS secrets configuration documentation
+
+**Note:** For EAS production builds, PostHog environment variables must be set as EAS secrets using `eas secret:create` or the EAS dashboard.
