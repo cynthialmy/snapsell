@@ -2,7 +2,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   KeyboardAvoidingView,
@@ -32,6 +32,13 @@ const CONDITION_OPTIONS = ['New', 'Used - Like New', 'Used - Good', 'Used - Fair
 
 const CURRENCY_OPTIONS = ['$', '€', '£', 'kr', '¥'];
 
+type FieldModification = {
+  field: string;
+  oldValue: any;
+  newValue: any;
+  timestamp: number;
+};
+
 export default function ListingPreviewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ payload?: string }>();
@@ -47,16 +54,18 @@ export default function ListingPreviewScreen() {
 
   const listing = payload?.listing;
 
-  const [title, setTitle] = useState(listing?.title ?? '');
-  const [price, setPrice] = useState(listing?.price ?? '');
-  const [description, setDescription] = useState(listing?.description ?? '');
-  const [condition, setCondition] = useState(() => {
+  const resolvedInitialCondition = (() => {
     const candidate = listing?.condition;
     if (candidate && CONDITION_OPTIONS.includes(candidate)) {
       return candidate;
     }
     return CONDITION_OPTIONS[2];
-  });
+  })();
+
+  const [title, setTitle] = useState(listing?.title ?? '');
+  const [price, setPrice] = useState(listing?.price ?? '');
+  const [description, setDescription] = useState(listing?.description ?? '');
+  const [condition, setCondition] = useState(resolvedInitialCondition);
   const [location, setLocation] = useState(listing?.location ?? '');
   const [pickupAvailable, setPickupAvailable] = useState(listing?.pickupAvailable ?? false);
   const [shippingAvailable, setShippingAvailable] = useState(listing?.shippingAvailable ?? false);
@@ -66,6 +75,21 @@ export default function ListingPreviewScreen() {
   const [showConditionModal, setShowConditionModal] = useState(false);
   const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false);
   const [currency, setCurrency] = useState<string>('$');
+
+  // Tracking state
+  const [initialValues, setInitialValues] = useState<Record<string, any> | null>(null);
+  const [modifications, setModifications] = useState<FieldModification[]>([]);
+
+  // Refs to track previous values for onBlur tracking
+  const prevTitleRef = useRef<string>(listing?.title ?? '');
+  const prevPriceRef = useRef<string>(listing?.price ?? '');
+  const prevLocationRef = useRef<string>(listing?.location ?? '');
+  const prevDescriptionRef = useRef<string>(listing?.description ?? '');
+  const prevPickupNotesRef = useRef<string>(listing?.pickupNotes ?? '');
+  const prevCurrencyRef = useRef<string>('$');
+  const prevConditionRef = useRef<string>(resolvedInitialCondition);
+  const prevPickupAvailableRef = useRef<boolean>(listing?.pickupAvailable ?? false);
+  const prevShippingAvailableRef = useRef<boolean>(listing?.shippingAvailable ?? false);
 
   const previewText = useMemo(
     () =>
@@ -115,6 +139,46 @@ export default function ListingPreviewScreen() {
           setCurrency(prefs.currency);
         }
       }
+
+      // Initialize tracking with initial values after preferences are loaded
+      // This captures the state after preferences have been applied
+      if (!initialValues) {
+        const finalCurrency = prefs?.currency || '$';
+        const finalLocation = listing?.location || prefs?.location || '';
+        const finalCondition = (() => {
+          const candidate = listing?.condition;
+          if (candidate && CONDITION_OPTIONS.includes(candidate)) {
+            return candidate;
+          }
+          return CONDITION_OPTIONS[2];
+        })();
+        const finalPickupAvailable = prefs?.pickupAvailable ?? listing?.pickupAvailable ?? false;
+        const finalShippingAvailable = prefs?.shippingAvailable ?? listing?.shippingAvailable ?? false;
+        const finalPickupNotes = prefs?.pickupNotes || listing?.pickupNotes || '';
+
+        const initial = {
+          title: listing?.title ?? '',
+          price: listing?.price ?? '',
+          currency: finalCurrency,
+          condition: finalCondition,
+          location: finalLocation,
+          description: listing?.description ?? '',
+          pickupAvailable: finalPickupAvailable,
+          shippingAvailable: finalShippingAvailable,
+          pickupNotes: finalPickupNotes,
+        };
+        setInitialValues(initial);
+
+        // Update refs to match the final initial state
+        prevCurrencyRef.current = finalCurrency;
+        prevConditionRef.current = finalCondition;
+        prevLocationRef.current = finalLocation;
+        prevPickupAvailableRef.current = finalPickupAvailable;
+        prevShippingAvailableRef.current = finalShippingAvailable;
+        prevPickupNotesRef.current = finalPickupNotes;
+
+        console.log('[Tracking] Initial values set:', initial);
+      }
     };
     loadSavedPreferences();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -142,9 +206,108 @@ export default function ListingPreviewScreen() {
     return null;
   }
 
+  // Helper function to normalize values for comparison
+  const normalizeValue = (value: any): any => {
+    if (typeof value === 'string') {
+      return value.trim();
+    }
+    return value;
+  };
+
+  // Helper function to track field modifications
+  const trackFieldModification = (field: string, oldValue: any, newValue: any) => {
+    if (!initialValues) {
+      return;
+    }
+
+    const normalizedOld = normalizeValue(oldValue);
+    const normalizedNew = normalizeValue(newValue);
+    const initialValue = normalizeValue(initialValues[field]);
+
+    // Don't track if values are the same
+    if (normalizedOld === normalizedNew) {
+      return;
+    }
+
+    // Don't track if both old and new values are empty/undefined
+    if (!initialValue && !normalizedOld && !normalizedNew) {
+      return;
+    }
+
+    // Only track if the new value is different from the initial value
+    // or if the old value was the initial value and new value is different
+    const isChangedFromInitial = normalizedNew !== initialValue;
+    const wasInitialValue = normalizedOld === initialValue;
+
+    if (isChangedFromInitial || (wasInitialValue && normalizedNew !== normalizedOld)) {
+      // Check if we already have a modification for this field
+      setModifications(prev => {
+        const existingIndex = prev.findIndex(m => m.field === field);
+        const newModification: FieldModification = {
+          field,
+          oldValue: wasInitialValue ? initialValue : normalizedOld,
+          newValue: normalizedNew,
+          timestamp: Date.now(),
+        };
+
+        console.log(`[Tracking] Field modified: ${field}`, {
+          oldValue: String(newModification.oldValue ?? ''),
+          newValue: String(newModification.newValue ?? ''),
+          initialValue: String(initialValue ?? ''),
+        });
+
+        if (existingIndex >= 0) {
+          // Update existing modification
+          const updated = [...prev];
+          updated[existingIndex] = newModification;
+          return updated;
+        } else {
+          // Add new modification
+          return [...prev, newModification];
+        }
+      });
+    }
+  };
+
   const handleCopy = async () => {
     await Clipboard.setStringAsync(previewText);
-    trackEvent('listing_copied', { source: 'preview' });
+
+    // Prepare modification summary for analytics
+    const modifiedFields = modifications.map(m => m.field);
+    const totalModifications = modifications.length;
+
+    // Flatten modifications for PostHog - convert to JSON string for nested data
+    // PostHog handles arrays of objects better as JSON strings
+    const modificationsJson = JSON.stringify(
+      modifications.map(m => ({
+        field: m.field,
+        oldValue: String(m.oldValue ?? ''),
+        newValue: String(m.newValue ?? ''),
+      }))
+    );
+
+    // Build properties object
+    const properties: Record<string, any> = {
+      source: 'preview',
+      total_modifications: totalModifications,
+    };
+
+    // Add modified fields as comma-separated string (PostHog-friendly)
+    if (modifiedFields.length > 0) {
+      properties.modified_fields = modifiedFields.join(',');
+      properties.modifications_json = modificationsJson;
+    }
+
+    // Debug logging
+    console.log('[Analytics] Tracking listing_copied:', {
+      totalModifications,
+      modifiedFields,
+      modificationsCount: modifications.length,
+      properties,
+    });
+
+    trackEvent('listing_copied', properties);
+
     setCopySuccess(true);
   };
 
@@ -180,7 +343,10 @@ export default function ListingPreviewScreen() {
         if (addr.city) parts.push(addr.city);
         if (addr.region) parts.push(addr.region);
         if (addr.country) parts.push(addr.country);
-        setLocation(parts.join(', ') || '');
+        const newLocation = parts.join(', ') || '';
+        trackFieldModification('location', prevLocationRef.current, newLocation);
+        prevLocationRef.current = newLocation;
+        setLocation(newLocation);
         setCopySuccess(false);
       }
     } catch (error) {
@@ -223,6 +389,10 @@ export default function ListingPreviewScreen() {
                   setTitle(text);
                   setCopySuccess(false);
                 }}
+                onBlur={() => {
+                  trackFieldModification('title', prevTitleRef.current, title);
+                  prevTitleRef.current = title;
+                }}
                 style={styles.input}
                 placeholder="e.g. Mid-century oak chair"
               />
@@ -252,6 +422,8 @@ export default function ListingPreviewScreen() {
                             <TouchableOpacity
                               key={option}
                               onPress={() => {
+                                trackFieldModification('currency', prevCurrencyRef.current, option);
+                                prevCurrencyRef.current = option;
                                 setCurrency(option);
                                 setCopySuccess(false);
                                 setShowCurrencyDropdown(false);
@@ -279,6 +451,10 @@ export default function ListingPreviewScreen() {
                     onChangeText={text => {
                       setPrice(text);
                       setCopySuccess(false);
+                    }}
+                    onBlur={() => {
+                      trackFieldModification('price', prevPriceRef.current, price);
+                      prevPriceRef.current = price;
                     }}
                     style={[styles.input, styles.priceInput]}
                     placeholder="120"
@@ -309,6 +485,8 @@ export default function ListingPreviewScreen() {
                           <TouchableOpacity
                             key={option}
                             onPress={() => {
+                              trackFieldModification('condition', prevConditionRef.current, option);
+                              prevConditionRef.current = option;
                               setCondition(option);
                               setCopySuccess(false);
                               setShowConditionModal(false);
@@ -344,6 +522,10 @@ export default function ListingPreviewScreen() {
                     setLocation(text);
                     setCopySuccess(false);
                   }}
+                  onBlur={() => {
+                    trackFieldModification('location', prevLocationRef.current, location);
+                    prevLocationRef.current = location;
+                  }}
                   style={[styles.input, styles.locationInput]}
                   placeholder="Oslo, Norway"
                 />
@@ -369,6 +551,8 @@ export default function ListingPreviewScreen() {
                 <Switch
                   value={pickupAvailable}
                   onValueChange={value => {
+                    trackFieldModification('pickupAvailable', prevPickupAvailableRef.current, value);
+                    prevPickupAvailableRef.current = value;
                     setPickupAvailable(value);
                     setCopySuccess(false);
                   }}
@@ -383,6 +567,10 @@ export default function ListingPreviewScreen() {
                       setPickupNotes(text);
                       setCopySuccess(false);
                     }}
+                    onBlur={() => {
+                      trackFieldModification('pickupNotes', prevPickupNotesRef.current, pickupNotes);
+                      prevPickupNotesRef.current = pickupNotes;
+                    }}
                     style={[styles.input, styles.textAreaSmall]}
                     placeholder="e.g. Evenings only, Oslo west"
                     multiline
@@ -394,6 +582,8 @@ export default function ListingPreviewScreen() {
                 <Switch
                   value={shippingAvailable}
                   onValueChange={value => {
+                    trackFieldModification('shippingAvailable', prevShippingAvailableRef.current, value);
+                    prevShippingAvailableRef.current = value;
                     setShippingAvailable(value);
                     setCopySuccess(false);
                   }}
@@ -407,6 +597,10 @@ export default function ListingPreviewScreen() {
                 onChangeText={text => {
                   setDescription(text);
                   setCopySuccess(false);
+                }}
+                onBlur={() => {
+                  trackFieldModification('description', prevDescriptionRef.current, description);
+                  prevDescriptionRef.current = description;
                 }}
                 style={[styles.input, styles.textArea]}
                 placeholder="Add measurements, wear-and-tear, pickup details…"

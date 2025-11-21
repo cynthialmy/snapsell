@@ -1,41 +1,53 @@
 import PostHog from 'posthog-react-native';
+import { Platform } from 'react-native';
 
 const POSTHOG_API_KEY = process.env.EXPO_PUBLIC_POSTHOG_API_KEY;
 const POSTHOG_HOST = process.env.EXPO_PUBLIC_POSTHOG_HOST;
 
 let posthogInstance: PostHog | null = null;
+let isInitialized = false;
+let initPromise: Promise<void> | null = null;
 
 /**
  * Initialize PostHog analytics client
  * Should be called once in the app root layout
  */
-export function initializePostHog(): void {
-    if (posthogInstance) {
+export async function initializePostHog(): Promise<void> {
+    if (posthogInstance || isInitialized) {
         return;
     }
 
-    if (!POSTHOG_API_KEY || !POSTHOG_HOST) {
-        console.warn('PostHog credentials not configured. Analytics will be disabled.');
-        return;
+    // If initialization is already in progress, wait for it
+    if (initPromise) {
+        return initPromise;
     }
 
-    try {
-        posthogInstance = new PostHog(POSTHOG_API_KEY, {
-            host: POSTHOG_HOST,
-            // Enable session recording for all platforms (web, iOS, Android)
-            enableSessionReplay: true,
-            // Enable console log capture for web (React Native SDK handles platform differences)
-            enable_recording_console_log: true,
-            // Configure session replay settings including console log capture
-            sessionReplayConfig: {
-                // Enable capturing of console logs (Android: logcat, iOS/Web: console logs)
-                captureLog: true,
-            },
-        });
-    } catch (error) {
-        // Don't break the app if PostHog fails to initialize
-        console.error('Failed to initialize PostHog:', error);
-    }
+    initPromise = (async () => {
+        if (!POSTHOG_API_KEY || !POSTHOG_HOST) {
+            console.warn('PostHog credentials not configured. Analytics will be disabled.');
+            isInitialized = true;
+            return;
+        }
+
+        try {
+            posthogInstance = new PostHog(POSTHOG_API_KEY, {
+                host: POSTHOG_HOST,
+                // Disable session replay for now to avoid issues on devices
+                enableSessionReplay: false,
+            });
+
+            // Wait for PostHog to be ready before marking as initialized
+            await posthogInstance.ready();
+            isInitialized = true;
+            console.log(`PostHog initialized successfully on ${Platform.OS}`);
+        } catch (error) {
+            // Don't break the app if PostHog fails to initialize
+            console.error('Failed to initialize PostHog:', error);
+            isInitialized = true; // Mark as initialized to prevent retries
+        }
+    })();
+
+    return initPromise;
 }
 
 /**
@@ -43,8 +55,21 @@ export function initializePostHog(): void {
  */
 export function trackEvent(eventName: string, properties?: Record<string, any>): void {
     try {
-        if (posthogInstance) {
-            posthogInstance.capture(eventName, properties);
+        if (!posthogInstance) {
+            console.warn(`PostHog not initialized. Event "${eventName}" not tracked.`);
+            return;
+        }
+
+        // Log what we're sending for debugging
+        console.log(`[PostHog] Tracking event: ${eventName}`, properties);
+
+        posthogInstance.capture(eventName, properties);
+
+        // Flush events immediately on iOS devices to ensure they're sent
+        if (Platform.OS === 'ios') {
+            posthogInstance.flush().catch((error) => {
+                console.warn('PostHog flush failed:', error);
+            });
         }
     } catch (error) {
         // Don't break the app if tracking fails

@@ -251,6 +251,7 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       });
 
       lastResponse = response;
+      console.log(`[API] Response status: ${response.status} ${response.statusText}`);
 
       if (!response.ok) {
         const message = await response.text();
@@ -268,15 +269,20 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       }
 
       const json = (await response.json()) as ListingData;
+      console.log('[API] Successfully received listing data');
       onStatusChange?.(null);
       return json;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      console.log(`[API] Error on attempt ${attempt}/${maxAttempts}:`, errorMessage);
+
       if (isAbortError(error)) {
         const timeoutMessage = getRandomTimeoutMessage();
         lastError = new Error(timeoutMessage);
         onStatusChange?.(getRandomWarmupMessage());
 
         if (attempt < maxAttempts) {
+          console.log(`[API] Retrying after timeout...`);
           await delay(TIMEOUT_RETRY_DELAY_MS);
           continue;
         }
@@ -288,19 +294,20 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
 
       // Check if this error is retryable
       if (isRetryableError(error, lastResponse) && attempt < maxAttempts) {
+        console.log(`[API] Retryable error, retrying in 1 second...`);
         // Wait before retrying (1 second delay)
         await delay(1000);
         continue;
       }
 
       // If not retryable or all retries exhausted, handle the error
-      const errorMessage = lastError.message;
+      const finalErrorMessage = lastError.message;
       const isNetworkError =
         error instanceof TypeError ||
-        errorMessage.toLowerCase().includes('network') ||
-        errorMessage.toLowerCase().includes('fetch') ||
-        errorMessage.toLowerCase().includes('failed') ||
-        errorMessage.toLowerCase().includes('connection');
+        finalErrorMessage.toLowerCase().includes('network') ||
+        finalErrorMessage.toLowerCase().includes('fetch') ||
+        finalErrorMessage.toLowerCase().includes('failed') ||
+        finalErrorMessage.toLowerCase().includes('connection');
 
       if (isNetworkError) {
         const isLocalhost = API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
