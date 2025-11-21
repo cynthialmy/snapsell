@@ -89,10 +89,16 @@ export default function HomeScreen() {
       });
 
       // Track successful listing generation
+      const formattedText = formatListingText({ ...listing, currency });
+      const truncatedText = formattedText.length > 1000
+        ? formattedText.substring(0, 1000)
+        : formattedText;
+
       trackEvent('listing_generated', {
         has_title: !!listing.title,
         has_price: !!listing.price,
         condition: listing.condition || '',
+        generated_text: truncatedText,
       });
 
       navigateToPreview({ listing, imageUri: asset.uri });

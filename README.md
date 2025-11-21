@@ -89,17 +89,27 @@ When running on a physical iPhone device using `npx expo run:ios --device`, you 
 
 Tunnel mode works even if your devices aren't on the same network:
 
-1. In one terminal, start Metro with tunnel mode:
+1. **Stop any running Metro processes** (Ctrl+C in terminals running Metro)
+
+2. In one terminal, start Metro with tunnel mode and clear cache:
 ```bash
-npx expo start --tunnel
+npx expo start --tunnel --clear
 ```
 
-2. In another terminal, build and install the app:
+3. Wait for Metro to fully start and show the tunnel URL (e.g., `exp://xxx-xxx.xxx.ngrok-free.app`)
+
+4. In another terminal, rebuild and install the app:
 ```bash
 npx expo run:ios --device
 ```
 
-The app will automatically connect to Metro through the tunnel.
+**Important:** If you still get connection errors, try uninstalling the app from your device first, then rebuild. The development client may have cached an old URL.
+
+**For Simulator:** You don't need tunnel mode. Use regular Metro:
+```bash
+npx expo start --clear
+npx expo run:ios
+```
 
 ### Solution 2: Ensure Same Network Connection
 
