@@ -17,7 +17,7 @@ export async function saveListing(
   listing: ListingData,
   currency: string = '$',
   imageUri: string = '',
-): Promise<void> {
+): Promise<string | null> {
   try {
     const existingListings = await loadListings();
     const newListing: SavedListing = {
@@ -31,8 +31,10 @@ export async function saveListing(
     // Add new listing at the beginning and limit total count
     const updatedListings = [newListing, ...existingListings].slice(0, MAX_LISTINGS);
     await AsyncStorage.setItem(LISTINGS_KEY, JSON.stringify(updatedListings));
+    return newListing.id;
   } catch (error) {
     console.error('Failed to save listing:', error);
+    return null;
   }
 }
 
@@ -48,6 +50,27 @@ export async function loadListings(): Promise<SavedListing[]> {
   } catch (error) {
     console.error('Failed to load listings:', error);
     return [];
+  }
+}
+
+export async function updateListing(
+  id: string,
+  listing: ListingData,
+  currency: string = '$',
+): Promise<void> {
+  try {
+    const listings = await loadListings();
+    const listingIndex = listings.findIndex(l => l.id === id);
+    if (listingIndex >= 0) {
+      listings[listingIndex] = {
+        ...listings[listingIndex],
+        listing,
+        currency,
+      };
+      await AsyncStorage.setItem(LISTINGS_KEY, JSON.stringify(listings));
+    }
+  } catch (error) {
+    console.error('Failed to update listing:', error);
   }
 }
 

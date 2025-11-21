@@ -237,18 +237,25 @@ export default function HomeScreen() {
     );
   };
 
-  const navigateToPreview = async (payload: { listing: ListingData; imageUri: string }) => {
-    // Save listing to history
-    try {
-      const preferences = await loadPreferences();
-      const currency = preferences?.currency || '$';
-      await saveListing(payload.listing, currency, payload.imageUri);
-    } catch (error) {
-      // Don't block navigation if saving fails
-      console.error('Failed to save listing:', error);
+  const navigateToPreview = async (payload: { listing: ListingData; imageUri: string; listingId?: string }) => {
+    // Save listing to history if it doesn't have an ID (new listing)
+    let listingId: string | undefined = payload.listingId;
+    if (!listingId) {
+      try {
+        const preferences = await loadPreferences();
+        const currency = preferences?.currency || '$';
+        const savedId = await saveListing(payload.listing, currency, payload.imageUri);
+        listingId = savedId || undefined;
+      } catch (error) {
+        // Don't block navigation if saving fails
+        console.error('Failed to save listing:', error);
+      }
     }
 
-    const params = encodeURIComponent(JSON.stringify(payload));
+    const params = encodeURIComponent(JSON.stringify({
+      ...payload,
+      listingId,
+    }));
     router.push({
       pathname: '/listing-preview',
       params: { payload: params },
@@ -299,6 +306,7 @@ export default function HomeScreen() {
     const payload = {
       listing: savedListing.listing,
       imageUri: savedListing.imageUri,
+      listingId: savedListing.id,
     };
     const params = encodeURIComponent(JSON.stringify(payload));
     router.push({

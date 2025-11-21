@@ -21,11 +21,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { trackEvent } from '@/utils/analytics';
 import type { ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
+import { saveListing, updateListing } from '@/utils/listings';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
 
 type PreviewPayload = {
   listing: ListingData;
   imageUri: string;
+  listingId?: string;
 };
 
 const CONDITION_OPTIONS = ['New', 'Used - Like New', 'Used - Good', 'Used - Fair', 'Refurbished'];
@@ -79,6 +81,7 @@ export default function ListingPreviewScreen() {
   // Tracking state
   const [initialValues, setInitialValues] = useState<Record<string, any> | null>(null);
   const [modifications, setModifications] = useState<FieldModification[]>([]);
+  const [listingId, setListingId] = useState<string | undefined>(payload?.listingId);
 
   // Refs to track previous values for onBlur tracking
   const prevTitleRef = useRef<string>(listing?.title ?? '');
@@ -112,6 +115,13 @@ export default function ListingPreviewScreen() {
       Alert.alert('Upload required', 'Please add an item before opening the preview.', [
         { text: 'OK', onPress: () => router.replace('/') },
       ]);
+    } else {
+      // Update listingId when payload changes
+      setListingId(payload.listingId);
+      // Reset modifications when payload changes (new listing loaded)
+      setModifications([]);
+      // Reset initial values so they get recalculated for the new listing
+      setInitialValues(null);
     }
   }, [payload, router]);
 
@@ -142,6 +152,7 @@ export default function ListingPreviewScreen() {
 
       // Initialize tracking with initial values after preferences are loaded
       // This captures the state after preferences have been applied
+      // Recalculate if initialValues is null (first load or after reset)
       if (!initialValues) {
         const finalCurrency = prefs?.currency || '$';
         const finalLocation = listing?.location || prefs?.location || '';
@@ -170,6 +181,9 @@ export default function ListingPreviewScreen() {
         setInitialValues(initial);
 
         // Update refs to match the final initial state
+        prevTitleRef.current = listing?.title ?? '';
+        prevPriceRef.current = listing?.price ?? '';
+        prevDescriptionRef.current = listing?.description ?? '';
         prevCurrencyRef.current = finalCurrency;
         prevConditionRef.current = finalCondition;
         prevLocationRef.current = finalLocation;
@@ -182,7 +196,7 @@ export default function ListingPreviewScreen() {
     };
     loadSavedPreferences();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [listing]);
 
   // Save preferences when they change
   useEffect(() => {
@@ -272,14 +286,39 @@ export default function ListingPreviewScreen() {
   const handleCopy = async () => {
     await Clipboard.setStringAsync(previewText);
 
+    // Ensure description modifications are tracked (onBlur may not fire reliably for multiline)
+    // Check all fields for untracked modifications before building analytics
+    const untrackedModifications: FieldModification[] = [];
+    if (initialValues) {
+      const normalizedDescription = normalizeValue(description);
+      const normalizedInitialDescription = normalizeValue(initialValues.description);
+      if (normalizedDescription !== normalizedInitialDescription) {
+        // Check if description modification is already tracked
+        const descriptionModExists = modifications.some(m => m.field === 'description');
+        if (!descriptionModExists) {
+          // Track it now and add to untracked list
+          trackFieldModification('description', normalizedInitialDescription, normalizedDescription);
+          untrackedModifications.push({
+            field: 'description',
+            oldValue: normalizedInitialDescription,
+            newValue: normalizedDescription,
+            timestamp: Date.now(),
+          });
+        }
+      }
+    }
+
+    // Combine existing modifications with any newly tracked ones
+    const allModifications = [...modifications, ...untrackedModifications];
+
     // Prepare modification summary for analytics
-    const modifiedFields = modifications.map(m => m.field);
-    const totalModifications = modifications.length;
+    const modifiedFields = allModifications.map(m => m.field);
+    const totalModifications = allModifications.length;
 
     // Flatten modifications for PostHog - convert to JSON string for nested data
     // PostHog handles arrays of objects better as JSON strings
     const modificationsJson = JSON.stringify(
-      modifications.map(m => ({
+      allModifications.map(m => ({
         field: m.field,
         oldValue: String(m.oldValue ?? ''),
         newValue: String(m.newValue ?? ''),
@@ -302,11 +341,35 @@ export default function ListingPreviewScreen() {
     console.log('[Analytics] Tracking listing_copied:', {
       totalModifications,
       modifiedFields,
-      modificationsCount: modifications.length,
+      modificationsCount: allModifications.length,
       properties,
     });
 
     trackEvent('listing_copied', properties);
+
+    // Build current listing data
+    const currentListing: ListingData = {
+      title,
+      price,
+      description,
+      condition,
+      location,
+      pickupAvailable,
+      shippingAvailable,
+      pickupNotes,
+    };
+
+    // Save or update listing
+    if (listingId) {
+      // Update existing listing
+      await updateListing(listingId, currentListing, currency);
+    } else {
+      // Save new listing (user modified a newly generated listing)
+      const newListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+      if (newListingId) {
+        setListingId(newListingId);
+      }
+    }
 
     setCopySuccess(true);
   };
