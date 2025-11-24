@@ -1,9 +1,9 @@
+import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { Modal, StyleSheet, Text, View } from 'react-native';
+import { Modal, StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withRepeat,
   withSequence,
   withTiming,
 } from 'react-native-reanimated';
@@ -24,33 +24,16 @@ type SnappyLoadingProps = {
 export function SnappyLoading({ visible }: SnappyLoadingProps) {
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const opacity = useSharedValue(1);
-  const translateY = useSharedValue(0);
-  const scale = useSharedValue(1);
+  const containerOpacity = useSharedValue(0);
 
-  // Animate the otter (bounce effect)
+  // Fade in/out the container
   useEffect(() => {
     if (visible) {
-      translateY.value = withRepeat(
-        withSequence(
-          withTiming(-8, { duration: 800 }),
-          withTiming(0, { duration: 800 })
-        ),
-        -1,
-        true
-      );
-      scale.value = withRepeat(
-        withSequence(
-          withTiming(1.1, { duration: 800 }),
-          withTiming(1, { duration: 800 })
-        ),
-        -1,
-        true
-      );
+      containerOpacity.value = withTiming(1, { duration: 300 });
     } else {
-      translateY.value = withTiming(0, { duration: 200 });
-      scale.value = withTiming(1, { duration: 200 });
+      containerOpacity.value = withTiming(0, { duration: 200 });
     }
-  }, [visible, translateY, scale]);
+  }, [visible, containerOpacity]);
 
   // Cycle through messages
   useEffect(() => {
@@ -76,11 +59,8 @@ export function SnappyLoading({ visible }: SnappyLoadingProps) {
     }
   }, [currentMessageIndex, visible, opacity]);
 
-  const otterAnimatedStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateY: translateY.value },
-      { scale: scale.value },
-    ],
+  const containerAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: containerOpacity.value,
   }));
 
   const messageAnimatedStyle = useAnimatedStyle(() => ({
@@ -98,14 +78,19 @@ export function SnappyLoading({ visible }: SnappyLoadingProps) {
       animationType="fade"
       statusBarTranslucent>
       <View style={styles.overlay}>
-        <View style={styles.container}>
-          <Animated.Text style={[styles.otter, otterAnimatedStyle]}>
-            🦦
-          </Animated.Text>
+        <Animated.View style={[styles.container, containerAnimatedStyle]}>
+          <View style={styles.imageContainer}>
+            <Image
+              source={require('@/assets/images/Snappy_Wave_Animation.png')}
+              style={styles.animation}
+              contentFit="contain"
+              transition={200}
+            />
+          </View>
           <Animated.Text style={[styles.message, messageAnimatedStyle]}>
             {MESSAGES[currentMessageIndex]}
           </Animated.Text>
-        </View>
+        </Animated.View>
       </View>
     </Modal>
   );
@@ -131,8 +116,15 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 8,
   },
-  otter: {
-    fontSize: 64,
+  imageContainer: {
+    width: 120,
+    height: 120,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  animation: {
+    width: '100%',
+    height: '100%',
   },
   message: {
     fontSize: 16,

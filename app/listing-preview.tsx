@@ -674,7 +674,16 @@ export default function ListingPreviewScreen() {
           </View>
 
           <View style={styles.previewCard}>
-            <Text style={styles.previewTitle}>Listing preview</Text>
+            <View style={styles.previewHeader}>
+              <View style={styles.previewIconContainer}>
+                <Image
+                  source={require('@/assets/images/snappy-money.png')}
+                  style={styles.previewIcon}
+                  contentFit="contain"
+                />
+              </View>
+              <Text style={styles.previewTitle}>Listing preview</Text>
+            </View>
             <Text style={styles.previewContent}>
               {previewText || 'Your formatted listing text will appear here as you fill the details.'}
             </Text>
@@ -963,12 +972,31 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 4 },
     elevation: 2,
   },
+  previewHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 4,
+  },
   previewTitle: {
     color: '#0369A1',
     fontSize: 13,
     letterSpacing: 0.5,
     textTransform: 'uppercase',
     fontWeight: '700',
+  },
+  previewIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#0EA5E9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  previewIcon: {
+    width: '100%',
+    height: '100%',
   },
   previewContent: {
     color: '#1F2937',

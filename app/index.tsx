@@ -347,7 +347,11 @@ export default function HomeScreen() {
         <View style={styles.steps}>
           <View style={styles.mascotCard}>
             <View style={styles.mascotAvatar}>
-              <Text style={styles.mascotAvatarText}>🦦</Text>
+              <Image
+                source={require('@/assets/images/snappy-camera.png')}
+                style={styles.mascotImage}
+                contentFit="contain"
+              />
             </View>
             <View style={styles.mascotBubble}>
               <Text style={styles.mascotIntro}>Snappy the Otter</Text>
@@ -543,11 +547,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#0EA5E9',
     alignItems: 'center',
     justifyContent: 'center',
+    overflow: 'hidden',
   },
-  mascotAvatarText: {
-    color: '#FFFFFF',
-    fontWeight: '700',
-    fontSize: 32,
+  mascotImage: {
+    width: '100%',
+    height: '100%',
   },
   mascotBubble: {
     flex: 1,
