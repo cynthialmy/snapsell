@@ -1,6 +1,6 @@
 {
   "expo": {
-    "name": "snapsell",
+    "name": "SnapSell",
     "slug": "snapsell",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.cynthiamengyuanli.snapsell",
+      "displayName": "SnapSell",
       "icon": {
         "light": "./assets/images/icon-light.png",
         "dark": "./assets/images/icon-dark.png",
