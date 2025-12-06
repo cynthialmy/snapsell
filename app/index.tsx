@@ -1,18 +1,19 @@
 import * as Clipboard from 'expo-clipboard';
+import * as FileSystem from 'expo-file-system/legacy';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -128,7 +129,77 @@ export default function HomeScreen() {
         generated_text: truncatedText,
       });
 
-      navigateToPreview({ listing, imageUri: asset.uri });
+      // If user is authenticated, upload image and create listing immediately
+      let storagePath: string | undefined = undefined;
+      let backendListingId: string | undefined = undefined;
+      if (user) {
+        try {
+          console.log('[Image Analysis] Uploading image immediately after analysis...');
+
+          // Convert image to base64
+          let base64Image: string | null = null;
+          if (asset.uri.startsWith('data:')) {
+            base64Image = asset.uri;
+          } else {
+            try {
+              const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+              if (fileInfo.exists) {
+                const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const contentType = asset.mimeType || 'image/jpeg';
+                base64Image = `data:${contentType};base64,${base64}`;
+              }
+            } catch (error) {
+              console.warn('[Image Analysis] Could not convert image to base64:', error);
+            }
+          }
+
+          if (base64Image) {
+            const { uploadImage, createListing } = await import('@/utils/listings-api');
+            const { data: uploadData, error: uploadError } = await uploadImage(base64Image, asset.mimeType || 'image/jpeg');
+            if (!uploadError && uploadData?.storage_path) {
+              storagePath = uploadData.storage_path;
+              console.log('[Image Analysis] Image uploaded successfully, storage_path:', storagePath);
+
+              // Auto-create listing in Supabase immediately
+              if (storagePath) {
+                try {
+                  console.log('[Image Analysis] Auto-creating listing in Supabase...');
+                  const priceCents = listing.price ? Math.round(parseFloat(listing.price) * 100) : undefined;
+                  const { listing: backendListing, error: createError } = await createListing({
+                    title: listing.title || 'Untitled Listing',
+                    description: listing.description || '',
+                    price_cents: priceCents,
+                    currency: 'USD', // Default, will be updated when user copies
+                    condition: listing.condition || undefined,
+                    storage_path: storagePath,
+                    visibility: 'private',
+                  });
+
+                  if (createError) {
+                    console.warn('[Image Analysis] Failed to auto-create listing:', createError);
+                    // Continue anyway - listing will be created when user clicks copy
+                  } else if (backendListing) {
+                    backendListingId = backendListing.id;
+                    console.log('[Image Analysis] Listing auto-created successfully, ID:', backendListingId);
+                  }
+                } catch (createError) {
+                  console.warn('[Image Analysis] Error auto-creating listing:', createError);
+                  // Continue anyway - listing will be created when user clicks copy
+                }
+              }
+            } else {
+              console.warn('[Image Analysis] Failed to upload image immediately:', uploadError);
+            }
+          }
+        } catch (error) {
+          console.warn('[Image Analysis] Error uploading image immediately:', error);
+          // Continue anyway - we'll try again when copying
+        }
+      }
+
+      navigateToPreview({ listing, imageUri: asset.uri, storagePath, backendListingId });
 
       // Reload quota after successful listing creation
       if (user) {
@@ -285,7 +356,7 @@ export default function HomeScreen() {
     );
   };
 
-  const navigateToPreview = async (payload: { listing: ListingData; imageUri: string; listingId?: string }) => {
+  const navigateToPreview = async (payload: { listing: ListingData; imageUri: string; listingId?: string; storagePath?: string; backendListingId?: string }) => {
     // Save listing to history if it doesn't have an ID (new listing)
     let listingId: string | undefined = payload.listingId;
     if (!listingId) {

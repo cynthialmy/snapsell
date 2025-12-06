@@ -4,9 +4,9 @@
  * Provides global authentication state management.
  */
 
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
-import { onAuthStateChange, getUser, type User } from '@/utils/auth';
+import { getUser, onAuthStateChange, type User } from '@/utils/auth';
 import { migrateLocalListingsToBackend } from '@/utils/listings-api';
+import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 
 interface AuthContextType {
   user: User | null;

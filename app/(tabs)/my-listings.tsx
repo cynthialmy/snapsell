@@ -1,5 +1,4 @@
-import { useRouter } from 'expo-router';
-import { useFocusEffect } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
   Alert,
@@ -14,8 +13,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { getMyListings, deleteListing as deleteListingApi } from '@/utils/listings-api';
 import { formatListingText } from '@/utils/listingFormatter';
+import { deleteListing as deleteListingApi, getMyListings } from '@/utils/listings-api';
 
 interface Listing {
   id: string;

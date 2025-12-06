@@ -25,12 +25,15 @@ import { saveListing, updateListing } from '@/utils/listings';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
 import * as Sharing from 'expo-sharing';
 import { useAuth } from '@/contexts/AuthContext';
-import { createListing, updateListing as updateListingApi } from '@/utils/listings-api';
+import { createListing, updateListing as updateListingApi, uploadImage } from '@/utils/listings-api';
+import * as FileSystem from 'expo-file-system/legacy';
 
 type PreviewPayload = {
   listing: ListingData;
   imageUri: string;
   listingId?: string;
+  storagePath?: string; // Storage path if image was already uploaded
+  backendListingId?: string; // Backend listing ID if already created in Supabase
 };
 
 const CONDITION_OPTIONS = ['New', 'Used - Like New', 'Used - Good', 'Used - Fair', 'Refurbished'];
@@ -125,6 +128,10 @@ export default function ListingPreviewScreen() {
     } else {
       // Update listingId when payload changes
       setListingId(payload.listingId);
+      // Update backendListingId when payload changes
+      if (payload.backendListingId) {
+        setBackendListingId(payload.backendListingId);
+      }
       // Reset modifications when payload changes (new listing loaded)
       setModifications([]);
       // Reset initial values so they get recalculated for the new listing
@@ -132,12 +139,37 @@ export default function ListingPreviewScreen() {
     }
   }, [payload, router]);
 
-  // Load saved preferences on mount
+  // Update form fields when listing changes (new image analyzed)
+  // This resets title, price, description, condition from the new listing
+  // but keeps location, pickup, shipping, currency from preferences
+  useEffect(() => {
+    if (listing) {
+      // Reset these fields from the new listing data
+      setTitle(listing.title ?? '');
+      setPrice(listing.price ?? '');
+      setDescription(listing.description ?? '');
+
+      // Reset condition from new listing, or default to "Used - Good"
+      const newCondition = (listing.condition && CONDITION_OPTIONS.includes(listing.condition))
+        ? listing.condition
+        : CONDITION_OPTIONS[2];
+      setCondition(newCondition);
+
+      // Update refs to match new values
+      prevTitleRef.current = listing.title ?? '';
+      prevPriceRef.current = listing.price ?? '';
+      prevDescriptionRef.current = listing.description ?? '';
+      prevConditionRef.current = newCondition;
+    }
+  }, [listing]);
+
+  // Load saved preferences on mount and when listing changes
+  // This ensures preferences (location, pickup, shipping, currency) persist across new listings
   useEffect(() => {
     const loadSavedPreferences = async () => {
       const prefs = await loadPreferences();
       if (prefs) {
-        // Only apply preferences if they're not already set from the listing
+        // Only apply location preference if listing doesn't have one
         const currentLocation = listing?.location ?? '';
         if (!currentLocation && prefs.location) {
           setLocation(prefs.location);
@@ -370,11 +402,245 @@ export default function ListingPreviewScreen() {
     if (listingId) {
       // Update existing listing
       await updateListing(listingId, currentListing, currency);
+
+      // Also update in backend if user is authenticated and listing exists in backend
+      if (user && backendListingId) {
+        const priceCents = Math.round(parseFloat(price || '0') * 100);
+        await updateListingApi(backendListingId, {
+          title,
+          description,
+          price_cents: priceCents,
+          currency: currency === '$' ? 'USD' : currency === '€' ? 'EUR' : currency === '£' ? 'GBP' : currency === '¥' ? 'JPY' : 'USD',
+          condition,
+        });
+      }
     } else {
       // Save new listing (user modified a newly generated listing)
-      const newListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
-      if (newListingId) {
-        setListingId(newListingId);
+      let savedListingId: string | null = null;
+
+      // If user is authenticated, save to backend
+      if (user) {
+        try {
+          // Check if listing was already auto-created in backend
+          if (backendListingId) {
+            // Update existing listing in backend
+            console.log('[Listing Save] Updating existing backend listing:', backendListingId);
+            const priceCents = Math.round(parseFloat(price || '0') * 100);
+            let currencyCode = 'USD';
+            if (currency === '€') {
+              currencyCode = 'EUR';
+            } else if (currency === '£') {
+              currencyCode = 'GBP';
+            } else if (currency === '¥') {
+              currencyCode = 'JPY';
+            } else if (currency === 'kr') {
+              currencyCode = 'NOK';
+            }
+
+            const { listing: updatedListing, error: updateError } = await updateListingApi(backendListingId, {
+              title,
+              description,
+              price_cents: priceCents,
+              currency: currencyCode,
+              condition,
+            });
+
+            if (updateError) {
+              console.error('[Listing Save] Failed to update backend listing:', updateError);
+              Alert.alert(
+                'Update Failed',
+                `Could not update listing: ${updateError.message || 'Unknown error'}.`,
+                [{ text: 'OK' }]
+              );
+            } else {
+              console.log('[Listing Save] Successfully updated backend listing');
+            }
+
+            // Save locally as well
+            savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+          } else {
+            // Create new listing in backend
+            console.log('[Listing Save] Starting backend save for authenticated user');
+
+            // Use existing storage_path if available (image was uploaded during analysis)
+            // Otherwise, try to upload the image now
+            let storagePath = payload?.storagePath || '';
+
+          // Only try to upload if we don't already have a storage_path
+          if (!storagePath && payload?.imageUri) {
+            try {
+              console.log('[Listing Save] Processing image:', payload.imageUri.substring(0, 50) + '...');
+
+              // Handle data URIs (already base64)
+              let base64Image: string | null = null;
+              if (payload.imageUri.startsWith('data:')) {
+                base64Image = payload.imageUri;
+                console.log('[Listing Save] Image is already base64, length:', base64Image.length);
+              } else {
+                // Read file and convert to base64
+                const fileInfo = await FileSystem.getInfoAsync(payload.imageUri);
+                if (fileInfo.exists) {
+                  console.log('[Listing Save] Reading image file...');
+                  const base64 = await FileSystem.readAsStringAsync(payload.imageUri, {
+                    encoding: 'base64',
+                  });
+
+                  // Determine content type
+                  let contentType = 'image/jpeg';
+                  if (payload.imageUri.includes('.png')) {
+                    contentType = 'image/png';
+                  } else if (payload.imageUri.includes('.webp')) {
+                    contentType = 'image/webp';
+                  }
+
+                  base64Image = `data:${contentType};base64,${base64}`;
+                  console.log('[Listing Save] Image converted to base64, length:', base64Image.length);
+                } else {
+                  console.warn('[Listing Save] Image file does not exist:', payload.imageUri);
+                }
+              }
+
+              // Upload image if we have base64
+              if (base64Image) {
+                console.log('[Listing Save] Uploading image to backend...');
+                const { data: uploadData, error: uploadError } = await uploadImage(base64Image);
+                if (!uploadError && uploadData?.storage_path) {
+                  storagePath = uploadData.storage_path;
+                  console.log('[Listing Save] Image uploaded successfully, storage_path:', storagePath);
+                } else {
+                  console.error('[Listing Save] Failed to upload image:', uploadError);
+                  // Don't show alert here - we'll show a better one after checking storagePath
+                }
+              } else {
+                console.warn('[Listing Save] No base64 image available for upload');
+              }
+            } catch (imageError: any) {
+              console.error('[Listing Save] Error processing image:', imageError);
+              // Continue without image - backend may allow listings without images
+            }
+          } else if (!storagePath) {
+            console.log('[Listing Save] No image URI provided and no existing storage_path');
+          } else {
+            console.log('[Listing Save] Using existing storage_path from analysis:', storagePath);
+          }
+
+          // Convert price to cents
+          const priceCents = Math.round(parseFloat(price || '0') * 100);
+          console.log('[Listing Save] Price converted to cents:', priceCents);
+
+          // Determine currency code
+          let currencyCode = 'USD';
+          if (currency === '€') {
+            currencyCode = 'EUR';
+          } else if (currency === '£') {
+            currencyCode = 'GBP';
+          } else if (currency === '¥') {
+            currencyCode = 'JPY';
+          } else if (currency === 'kr') {
+            currencyCode = 'NOK';
+          }
+
+          // Check if storage_path is required and available
+          // Backend requires storage_path, so we can't create listing without image
+          if (!storagePath) {
+            console.error('[Listing Save] Cannot create listing: storage_path is required but image upload failed or no image available');
+
+            // Determine the reason for failure
+            let errorMessage = 'Unable to upload image. ';
+            if (!payload?.imageUri) {
+              errorMessage += 'No image was provided.';
+            } else if (payload.imageUri.startsWith('file://')) {
+              errorMessage += 'The image file may have been deleted from cache. Please analyze a new image.';
+            } else {
+              errorMessage += 'The image could not be processed. Please try again.';
+            }
+            errorMessage += ' The listing has been saved locally only.';
+
+            Alert.alert(
+              'Cannot Save to Backend',
+              errorMessage,
+              [{ text: 'OK' }]
+            );
+            // Fall back to local storage only
+            savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+          } else {
+            // Create listing in backend
+            console.log('[Listing Save] Creating listing in backend with params:', {
+              title,
+              description: description.substring(0, 50) + '...',
+              price_cents: priceCents,
+              currency: currencyCode,
+              condition,
+              storage_path: storagePath,
+            });
+
+            const { listing: backendListing, error: createError } = await createListing({
+              title,
+              description,
+              price_cents: priceCents,
+              currency: currencyCode,
+              condition,
+              storage_path: storagePath,
+              visibility: 'private',
+            });
+
+            if (createError) {
+              console.error('[Listing Save] Backend error:', createError);
+
+              // Handle quota exceeded
+              if (createError.code === 'QUOTA_EXCEEDED') {
+                Alert.alert(
+                  'Quota Exceeded',
+                  'You\'ve reached your listing limit. Upgrade to create more listings.',
+                  [
+                    { text: 'Cancel', style: 'cancel' },
+                    { text: 'Upgrade', onPress: () => router.push('/(tabs)/upgrade') },
+                  ]
+                );
+              } else {
+                // Show error to user
+                const errorMessage = createError.message || 'Unknown error';
+                console.warn('[Listing Save] Failed to save listing to backend, saving locally instead:', createError);
+                Alert.alert(
+                  'Backend Save Failed',
+                  `Could not save to backend: ${errorMessage}. Listing saved locally only.`,
+                  [{ text: 'OK' }]
+                );
+                // Fall back to local storage
+                savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+              }
+            } else if (backendListing) {
+              // Successfully saved to backend
+              console.log('[Listing Save] Successfully saved to backend, listing ID:', backendListing.id);
+              savedListingId = backendListing.id;
+              setBackendListingId(backendListing.id);
+              if (backendListing.share_slug) {
+                setShareLink(backendListing.share_slug);
+              }
+            } else {
+              console.warn('[Listing Save] No listing returned from backend, but no error either');
+              // Fall back to local storage
+              savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+            }
+          }
+          }
+        } catch (error: any) {
+          console.error('[Listing Save] Unexpected error saving to backend:', error);
+          Alert.alert(
+            'Save Error',
+            `Error saving to backend: ${error?.message || 'Unknown error'}. Listing saved locally only.`,
+            [{ text: 'OK' }]
+          );
+          // Fall back to local storage
+          savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+        }
+      } else {
+        // User not authenticated, save locally only
+        savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+      }
+
+      if (savedListingId) {
+        setListingId(savedListingId);
       }
     }
 

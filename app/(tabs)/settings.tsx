@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Alert,
   Pressable,
@@ -14,8 +14,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { checkQuota } from '@/utils/listings-api';
 import { signOut } from '@/utils/auth';
+import { checkQuota } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
 
 const CURRENCY_OPTIONS = ['$', '€', '£', 'kr', '¥'];

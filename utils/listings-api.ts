@@ -13,14 +13,22 @@ import { clearListings, loadListings } from './listings';
 
 // Edge Function base URL
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL;
-const EDGE_FUNCTION_BASE = process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL ||
+const EDGE_FUNCTION_BASE_RAW = process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL ||
   (SUPABASE_URL ? `${SUPABASE_URL}/functions/v1` : null);
+
+// Normalize URL to remove trailing slashes and prevent double slashes in path
+// Keep protocol double slashes (http://) but remove path double slashes
+const EDGE_FUNCTION_BASE = EDGE_FUNCTION_BASE_RAW
+  ? EDGE_FUNCTION_BASE_RAW.replace(/\/+$/, '').replace(/([^:]\/)\/+/g, '$1')
+  : null;
 
 // Validate configuration (but don't throw in production to allow graceful degradation)
 if (!EDGE_FUNCTION_BASE) {
   console.warn(
     'Missing Supabase configuration. Please set EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL in your environment variables.'
   );
+} else {
+  console.log('[Config] Edge Function Base URL:', EDGE_FUNCTION_BASE);
 }
 
 // ============================================
@@ -66,15 +74,27 @@ export async function uploadImage(base64Image: string, contentType: string = 'im
   try {
     // Check if backend is configured
     if (!EDGE_FUNCTION_BASE) {
+      console.error('[Upload] Backend not configured - EDGE_FUNCTION_BASE is missing');
       throw new Error('Backend not configured');
     }
 
+    console.log('[Upload] Backend URL:', EDGE_FUNCTION_BASE);
+    console.log('[Upload] Upload endpoint:', `${EDGE_FUNCTION_BASE}/upload`);
+    console.log('[Upload] Image size:', base64Image.length, 'bytes');
+    console.log('[Upload] Content type:', contentType);
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
+      console.error('[Upload] Not authenticated - no session');
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${EDGE_FUNCTION_BASE}/upload`, {
+    console.log('[Upload] Session found, access token length:', session.access_token?.length || 0);
+
+    const uploadUrl = `${EDGE_FUNCTION_BASE}/upload`;
+    console.log('[Upload] Making request to:', uploadUrl);
+
+    const response = await fetch(uploadUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -86,15 +106,40 @@ export async function uploadImage(base64Image: string, contentType: string = 'im
       }),
     });
 
+    console.log('[Upload] Response status:', response.status, response.statusText);
+
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({ error: 'Upload failed' }));
+      const errorText = await response.text();
+      console.error('[Upload] Error response body:', errorText);
+
+      let errorData;
+      try {
+        errorData = JSON.parse(errorText);
+      } catch {
+        errorData = { error: errorText || 'Upload failed' };
+      }
+
+      console.error('[Upload] Parsed error data:', errorData);
       throw new Error(errorData.error || `Upload failed with status ${response.status}`);
     }
 
-    const data = await response.json();
+    const responseText = await response.text();
+    console.log('[Upload] Success response body length:', responseText.length);
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('[Upload] Failed to parse response as JSON:', parseError);
+      throw new Error('Invalid response from server');
+    }
+
+    console.log('[Upload] Upload successful, storage_path:', data.storage_path);
     return { data, error: null };
   } catch (error: any) {
-    console.error('Upload error:', error);
+    console.error('[Upload] Upload error:', error);
+    console.error('[Upload] Error message:', error?.message);
+    console.error('[Upload] Error stack:', error?.stack);
     return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
   }
 }
@@ -164,15 +209,34 @@ export async function createListing(params: CreateListingParams) {
   try {
     // Check if backend is configured
     if (!EDGE_FUNCTION_BASE) {
+      console.error('[CreateListing] Backend not configured - EDGE_FUNCTION_BASE is missing');
       throw new Error('Backend not configured');
     }
 
+    console.log('[CreateListing] Backend URL:', EDGE_FUNCTION_BASE);
+    console.log('[CreateListing] Create endpoint:', `${EDGE_FUNCTION_BASE}/listings-create`);
+    console.log('[CreateListing] Params:', {
+      title: params.title,
+      description: params.description?.substring(0, 50) + '...',
+      price_cents: params.price_cents,
+      currency: params.currency,
+      condition: params.condition,
+      storage_path: params.storage_path || '(none)',
+      visibility: params.visibility,
+    });
+
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
+      console.error('[CreateListing] Not authenticated - no session');
       throw new Error('Not authenticated');
     }
 
-    const response = await fetch(`${EDGE_FUNCTION_BASE}/listings-create`, {
+    console.log('[CreateListing] Session found, access token length:', session.access_token?.length || 0);
+
+    const createUrl = `${EDGE_FUNCTION_BASE}/listings-create`;
+    console.log('[CreateListing] Making request to:', createUrl);
+
+    const response = await fetch(createUrl, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -181,9 +245,24 @@ export async function createListing(params: CreateListingParams) {
       body: JSON.stringify(params),
     });
 
-    const data = await response.json();
+    console.log('[CreateListing] Response status:', response.status, response.statusText);
+
+    const responseText = await response.text();
+    console.log('[CreateListing] Response body length:', responseText.length);
+    console.log('[CreateListing] Response body preview:', responseText.substring(0, 200));
+
+    let data;
+    try {
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('[CreateListing] Failed to parse response as JSON:', parseError);
+      console.error('[CreateListing] Raw response:', responseText);
+      throw new Error('Invalid response from server');
+    }
 
     if (!response.ok) {
+      console.error('[CreateListing] Error response:', data);
+
       // Handle quota exceeded (402)
       if (response.status === 402) {
         return {
@@ -211,9 +290,12 @@ export async function createListing(params: CreateListingParams) {
       };
     }
 
+    console.log('[CreateListing] Success! Listing ID:', data.listing?.id);
     return { listing: data.listing, quota: data.quota, error: null };
   } catch (error: any) {
-    console.error('Create listing error:', error);
+    console.error('[CreateListing] Create listing error:', error);
+    console.error('[CreateListing] Error message:', error?.message);
+    console.error('[CreateListing] Error stack:', error?.stack);
     return { listing: null, error };
   }
 }
