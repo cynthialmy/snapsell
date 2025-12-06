@@ -5,22 +5,24 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SnappyLoading } from '@/components/snappy-loading';
+import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { deleteListing, loadListings, saveListing, type SavedListing } from '@/utils/listings';
+import { checkQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
 
 // Transform technical error messages to cute Snappy messages
@@ -62,10 +64,13 @@ function transformErrorMessage(message: string): string {
 
 export default function HomeScreen() {
   const router = useRouter();
+  const { user } = useAuth();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [previousListings, setPreviousListings] = useState<SavedListing[]>([]);
   const [copySuccessId, setCopySuccessId] = useState<string | null>(null);
+  const [quota, setQuota] = useState<{ used: number; limit: number; remaining: number } | null>(null);
+  const [quotaLoading, setQuotaLoading] = useState(false);
 
   const ctaLabel = useMemo(
     () => (isAnalyzing ? 'Analyzing photo…' : 'Snap / Upload Item'),
@@ -77,6 +82,28 @@ export default function HomeScreen() {
     setErrorMessage(null);
 
     try {
+      // Check quota if user is authenticated
+      if (user) {
+        const { quota: currentQuota, error: quotaError } = await checkQuota();
+        // Silently handle quota errors (backend might not be set up yet)
+        if (!quotaError && currentQuota && currentQuota.remaining === 0) {
+          // Quota exceeded
+          Alert.alert(
+            'Quota Exceeded',
+            `You've used all ${currentQuota.limit} of your listings. Upgrade to create more listings.`,
+            [
+              { text: 'Cancel', style: 'cancel' },
+              {
+                text: 'Upgrade',
+                onPress: () => router.push('/(tabs)/upgrade'),
+              },
+            ]
+          );
+          setIsAnalyzing(false);
+          return;
+        }
+      }
+
       const preferences = await loadPreferences();
       const currency = preferences?.currency || '$';
 
@@ -102,9 +129,30 @@ export default function HomeScreen() {
       });
 
       navigateToPreview({ listing, imageUri: asset.uri });
+
+      // Reload quota after successful listing creation
+      if (user) {
+        await loadQuota();
+      }
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
-      setErrorMessage(transformErrorMessage(rawMessage));
+
+      // Check if it's a quota exceeded error
+      if (rawMessage.includes('quota') || rawMessage.includes('QUOTA_EXCEEDED')) {
+        Alert.alert(
+          'Quota Exceeded',
+          'You\'ve reached your listing limit. Upgrade to create more listings.',
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Upgrade',
+              onPress: () => router.push('/(tabs)/upgrade'),
+            },
+          ]
+        );
+      } else {
+        setErrorMessage(transformErrorMessage(rawMessage));
+      }
     } finally {
       setIsAnalyzing(false);
     }
@@ -257,7 +305,7 @@ export default function HomeScreen() {
       listingId,
     }));
     router.push({
-      pathname: '/listing-preview',
+      pathname: '/(tabs)/listing-preview',
       params: { payload: params },
     });
   };
@@ -273,6 +321,31 @@ export default function HomeScreen() {
     pickupNotes: '',
   };
 
+  // Load quota
+  const loadQuota = useCallback(async () => {
+    if (!user) {
+      setQuota(null);
+      return;
+    }
+
+    setQuotaLoading(true);
+    try {
+      const { quota: userQuota, error } = await checkQuota();
+      if (error) {
+        // Silently handle backend not configured or unavailable
+        // Only show quota if we successfully got it
+        setQuota(null);
+      } else if (userQuota) {
+        setQuota(userQuota);
+      }
+    } catch (error) {
+      // Silently handle errors - backend might not be set up yet
+      setQuota(null);
+    } finally {
+      setQuotaLoading(false);
+    }
+  }, [user]);
+
   // Load previous listings on mount and when screen comes into focus
   const loadPreviousListings = useCallback(async () => {
     const listings = await loadListings();
@@ -282,7 +355,8 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       loadPreviousListings();
-    }, [loadPreviousListings]),
+      loadQuota();
+    }, [loadPreviousListings, loadQuota]),
   );
 
   const sampleListingText = useMemo(
@@ -310,7 +384,7 @@ export default function HomeScreen() {
     };
     const params = encodeURIComponent(JSON.stringify(payload));
     router.push({
-      pathname: '/listing-preview',
+      pathname: '/(tabs)/listing-preview',
       params: { payload: params },
     });
   };
@@ -344,6 +418,24 @@ export default function HomeScreen() {
         <Text style={styles.eyebrow}>SNAPSELL</Text>
         <Text style={styles.title}>Turn a single photo into a ready-to-post listing.</Text>
 
+        {user && quota && (
+          <View style={styles.quotaCard}>
+            <Text style={styles.quotaText}>
+              {quota.used} / {quota.limit} listings used
+            </Text>
+            <Text style={styles.quotaSubtext}>
+              {quota.remaining} remaining
+            </Text>
+            {quota.remaining === 0 && (
+              <Pressable
+                onPress={() => router.push('/(tabs)/upgrade')}
+                style={styles.upgradeButton}>
+                <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
+
         <View style={styles.steps}>
           <View style={styles.mascotCard}>
             <View style={styles.mascotAvatar}>
@@ -373,7 +465,8 @@ export default function HomeScreen() {
             {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
           </View>
 
-          {previousListings.length > 0 ? (
+          {!user && previousListings.length > 0 ? (
+            // Unauthenticated users: show local listings
             <>
               <Text style={styles.previousListingsHeader}>Previous listings</Text>
               {previousListings.map(savedListing => {
@@ -652,5 +745,37 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginTop: 8,
     fontStyle: 'italic',
+  },
+  quotaCard: {
+    backgroundColor: '#EFF6FF',
+    borderRadius: 14,
+    padding: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+  },
+  quotaText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#0F172A',
+    marginBottom: 4,
+  },
+  quotaSubtext: {
+    fontSize: 14,
+    color: '#64748B',
+  },
+  upgradeButton: {
+    backgroundColor: '#4338CA',
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  upgradeButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });

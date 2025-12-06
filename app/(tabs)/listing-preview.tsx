@@ -23,6 +23,9 @@ import type { ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing, updateListing } from '@/utils/listings';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
+import * as Sharing from 'expo-sharing';
+import { useAuth } from '@/contexts/AuthContext';
+import { createListing, updateListing as updateListingApi } from '@/utils/listings-api';
 
 type PreviewPayload = {
   listing: ListingData;
@@ -44,6 +47,10 @@ type FieldModification = {
 export default function ListingPreviewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ payload?: string }>();
+  const { user } = useAuth();
+  const [shareLink, setShareLink] = useState<string | null>(null);
+  const [shareSuccess, setShareSuccess] = useState(false);
+  const [backendListingId, setBackendListingId] = useState<string | null>(null);
 
   const payload = useMemo<PreviewPayload | null>(() => {
     if (!params.payload) return null;
@@ -113,7 +120,7 @@ export default function ListingPreviewScreen() {
   useEffect(() => {
     if (!payload) {
       Alert.alert('Upload required', 'Please add an item before opening the preview.', [
-        { text: 'OK', onPress: () => router.replace('/') },
+        { text: 'OK', onPress: () => router.replace('/(tabs)/') },
       ]);
     } else {
       // Update listingId when payload changes
@@ -374,9 +381,140 @@ export default function ListingPreviewScreen() {
     setCopySuccess(true);
   };
 
+  const handleShare = async () => {
+    if (!user) {
+      Alert.alert('Sign in required', 'Please sign in to share listings.');
+      return;
+    }
+
+    try {
+      // Check if backend is configured
+      const EDGE_FUNCTION_BASE = process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL ||
+        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1`;
+
+      if (!EDGE_FUNCTION_BASE || EDGE_FUNCTION_BASE.includes('YOUR_') || EDGE_FUNCTION_BASE.includes('your_')) {
+        Alert.alert(
+          'Backend not configured',
+          'Sharing requires backend setup. Please configure your Supabase Edge Functions.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+
+      // First, ensure listing is saved to backend
+      const currentListing: ListingData = {
+        title,
+        price,
+        description,
+        condition,
+        location,
+        pickupAvailable,
+        shippingAvailable,
+        pickupNotes,
+      };
+
+      let listingIdToShare = backendListingId;
+
+      // If no backend listing ID, create one
+      if (!listingIdToShare) {
+        // Convert price to cents
+        const priceCents = Math.round(parseFloat(price || '0') * 100);
+
+        // For now, we'll need to upload the image first
+        // This is a simplified version - in production, you'd want to handle image upload properly
+        const { listing: newListing, error: createError } = await createListing({
+          title,
+          description,
+          price_cents: priceCents,
+          currency: currency === '$' ? 'USD' : currency,
+          condition,
+          storage_path: '', // This would need to be set from image upload
+          visibility: 'shared',
+        });
+
+        if (createError) {
+          if (createError.code === 'QUOTA_EXCEEDED') {
+            Alert.alert(
+              'Quota Exceeded',
+              'You\'ve reached your listing limit. Upgrade to share more listings.',
+              [
+                { text: 'Cancel', style: 'cancel' },
+                { text: 'Upgrade', onPress: () => router.push('/(tabs)/upgrade') },
+              ]
+            );
+          } else {
+            // Check if it's a server error (backend not available)
+            const errorMessage = createError.message || '';
+            if (errorMessage.includes('Internal server error') || errorMessage.includes('Failed to fetch')) {
+              Alert.alert(
+                'Backend unavailable',
+                'Unable to connect to the backend. Please check your configuration or try again later.',
+                [{ text: 'OK' }]
+              );
+            } else {
+              Alert.alert('Error', 'Failed to create listing for sharing. Please try again.');
+            }
+          }
+          return;
+        }
+
+        if (newListing) {
+          listingIdToShare = newListing.id;
+          setBackendListingId(newListing.id);
+          if (newListing.share_slug) {
+            setShareLink(newListing.share_slug);
+          }
+        }
+      } else {
+        // Update existing listing
+        const priceCents = Math.round(parseFloat(price || '0') * 100);
+        const { error: updateError } = await updateListingApi(listingIdToShare, {
+          title,
+          description,
+          price_cents: priceCents,
+          currency: currency === '$' ? 'USD' : currency,
+          condition,
+        });
+
+        if (updateError) {
+          console.warn('Failed to update listing for share:', updateError);
+          // Continue anyway - we can still share with existing data
+        }
+      }
+
+      // Generate share link
+      const shareBaseUrl = process.env.EXPO_PUBLIC_SHARE_BASE_URL || 'snapsell://share';
+      const slug = shareLink || listingIdToShare; // Use share_slug if available, otherwise use ID
+      const shareUrl = `${shareBaseUrl}/${slug}`;
+
+      // Copy to clipboard and show native share sheet
+      await Clipboard.setStringAsync(shareUrl);
+      setShareSuccess(true);
+      setTimeout(() => setShareSuccess(false), 3000);
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(shareUrl);
+      }
+
+      trackEvent('listing_shared', { listing_id: listingIdToShare });
+    } catch (error: any) {
+      console.error('Share error:', error);
+      const errorMessage = error?.message || '';
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('network')) {
+        Alert.alert(
+          'Connection error',
+          'Unable to connect to the backend. Please check your internet connection and try again.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert('Error', 'Failed to share listing. Please try again.');
+      }
+    }
+  };
+
   const handleReset = () => {
     setCopySuccess(false);
-    router.replace('/');
+    router.replace('/(tabs)/');
   };
 
   const handleLocateMe = async () => {
@@ -698,6 +836,21 @@ export default function ListingPreviewScreen() {
           {copySuccess ? (
             <Text style={styles.success}>Copied! Paste it into your marketplace.</Text>
           ) : null}
+
+          {shareSuccess ? (
+            <Text style={styles.success}>Share link copied to clipboard!</Text>
+          ) : null}
+
+          {user && (
+            <Pressable
+              onPress={handleShare}
+              style={({ pressed }) => [
+                styles.shareButton,
+                pressed && styles.shareButtonPressed,
+              ]}>
+              <Text style={styles.shareButtonText}>Share listing</Text>
+            </Pressable>
+          )}
 
           <Pressable
             onPress={handleReset}
@@ -1039,5 +1192,20 @@ const styles = StyleSheet.create({
   secondaryButtonText: {
     color: '#312E81',
     fontWeight: '600',
+  },
+  shareButton: {
+    backgroundColor: '#4338CA',
+    paddingVertical: 16,
+    borderRadius: 14,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  shareButtonPressed: {
+    opacity: 0.85,
+  },
+  shareButtonText: {
+    color: '#FFFFFF',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });

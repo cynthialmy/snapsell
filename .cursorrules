@@ -102,6 +102,21 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 
 # Scratchpad
 
+## Backend Integration and Freemium Mode Implementation (2025-01-XX)
+
+**Task:** Integrate Supabase backend for authentication, quota management, listing persistence. Add Ko-fi payment integration, sharing functionality, and build all required UI screens.
+
+**Progress:**
+[X] Phase 1: Setup and Configuration - Added expo-sharing, created .env template
+[X] Phase 2: Authentication Integration - Created utils/auth.ts, contexts/AuthContext.tsx
+[X] Phase 3: Authentication UI Screens - Created sign-in, sign-up, magic-link, profile screens
+[X] Phase 4: Backend Integration (Listings) - Created utils/listings-api.ts with all functions
+[X] Phase 5: Main App Screens - Created my-listings, settings, upgrade, share screens
+[X] Phase 6: Payment Integration (Ko-fi) - Created utils/payments.ts with Ko-fi integration
+[X] Phase 7: Error Handling - Added quota exceeded, network, auth error handling
+[X] Phase 8: Navigation Structure - Updated root layout with AuthProvider, deep link handling, tab navigation
+[ ] Phase 9: Migration and Cleanup - Need to test and verify all functionality
+
 ## Fix iOS Physical Device Development Server Connection Issue (2025-01-XX)
 
 **Problem:** When running `npx expo run:ios --device`, the app installs but shows "no development servers" error. Metro bundler is running at `http://192.168.1.90:8081` but device can't connect.
@@ -131,3 +146,33 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 - `README.md`: Added EAS secrets configuration documentation
 
 **Note:** For EAS production builds, PostHog environment variables must be set as EAS secrets using `eas secret:create` or the EAS dashboard.
+
+## Backend Migration to Supabase Edge Functions (2025-01-XX)
+
+**Task:** Migrate image analysis and other backend functions from FastAPI to Supabase Edge Functions.
+
+**Status:** ✅ Backend implementation complete, frontend integration complete
+
+**Backend Deliverables:**
+- `BACKEND_MIGRATION_GUIDE.md` - Complete migration documentation with API specs, dependencies, environment variables, error handling, and code examples
+- `examples-backend/analyze-image-edge-function.ts` - Complete reference implementation in TypeScript/Deno for Supabase Edge Functions
+- Backend team created: `supabase/functions/analyze-image/index.ts` - Production Edge Function
+
+**Frontend Integration:**
+- Updated `utils/api.ts` to use Supabase Edge Function endpoint
+- Automatic endpoint selection: Supabase Edge Function (priority) → Legacy FastAPI (fallback)
+- Added authentication token support for Edge Function requests
+- Updated error handling for JSON error responses
+- Created `FRONTEND_INTEGRATION_COMPLETE.md` - Integration summary and testing guide
+
+**Key Information:**
+- Main endpoint: `/functions/v1/analyze-image` (POST) - Analyzes product images using LLM vision models
+- Supports multiple LLM providers: OpenAI, Azure OpenAI, Anthropic, Gemini, DeepSeek, SiliconFlow
+- Includes PostHog analytics integration (non-blocking)
+- Handles JSON parsing, error handling, and response normalization
+- Frontend automatically uses Edge Function if Supabase is configured
+
+**Files for Reference:**
+- Original implementation: `backend/main.py`
+- LLM API helper: `tools/llm_api.py`
+- Frontend integration: `utils/api.ts` (updated), `utils/listings-api.ts` (new)

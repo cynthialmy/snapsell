@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { supabase } from './auth';
 
 export type ListingData = {
   title: string;
@@ -26,18 +27,31 @@ const HOSTED_BACKEND_URL = 'https://snapsell-backend.onrender.com';
 const ALLOW_DEVICE_LOCALHOST =
   process.env.EXPO_PUBLIC_ALLOW_DEVICE_LOCALHOST?.toLowerCase() === 'true';
 
-function isLoopbackUrl(value: string): boolean {
-  const lower = value.toLowerCase();
-  return (
-    lower.includes('localhost') ||
-    lower.includes('127.0.0.1') ||
-    lower.includes('::1') ||
-    lower.includes('10.0.2.2')
-  );
+// Get Supabase Edge Function URL
+function getEdgeFunctionUrl(): string | null {
+  const functionsUrl = process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL;
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+
+  if (functionsUrl) {
+    return functionsUrl;
+  }
+
+  if (supabaseUrl) {
+    return `${supabaseUrl}/functions/v1`;
+  }
+
+  return null;
 }
 
-// Get API URL, replacing localhost with the local network IP for mobile devices
+// Get API URL - prefer Supabase Edge Function, fallback to legacy FastAPI backend
 function getApiUrl(): string {
+  // First, try to use Supabase Edge Function
+  const edgeFunctionUrl = getEdgeFunctionUrl();
+  if (edgeFunctionUrl) {
+    return edgeFunctionUrl;
+  }
+
+  // Fallback to legacy FastAPI backend
   const envUrl = process.env.EXPO_PUBLIC_API_URL;
   if (envUrl) {
     if (Platform.OS !== 'web' && !ALLOW_DEVICE_LOCALHOST && isLoopbackUrl(envUrl)) {
@@ -47,7 +61,6 @@ function getApiUrl(): string {
       );
       return HOSTED_BACKEND_URL;
     }
-    // If explicitly set (and allowed), use it
     return envUrl;
   }
 
@@ -64,7 +77,19 @@ function getApiUrl(): string {
   return defaultUrl;
 }
 
+function isLoopbackUrl(value: string): boolean {
+  const lower = value.toLowerCase();
+  return (
+    lower.includes('localhost') ||
+    lower.includes('127.0.0.1') ||
+    lower.includes('::1') ||
+    lower.includes('10.0.2.2')
+  );
+}
+
 const API_URL = getApiUrl();
+const EDGE_FUNCTION_URL = getEdgeFunctionUrl();
+const USE_EDGE_FUNCTION = EDGE_FUNCTION_URL !== null;
 
 // Helper function to check if an error is retryable
 function isRetryableError(error: unknown, response?: Response): boolean {
@@ -197,7 +222,12 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      console.log('Uploading image to:', `${API_URL}/api/analyze-image`);
+      // Determine endpoint URL
+      const endpointUrl = USE_EDGE_FUNCTION
+        ? `${EDGE_FUNCTION_URL}/analyze-image`
+        : `${API_URL}/api/analyze-image`;
+
+      console.log('Uploading image to:', endpointUrl);
       console.log('Platform:', Platform.OS);
       if (attempt > 1) {
         console.log(`Retry attempt ${attempt - 1} of ${maxAttempts - 1}`);
@@ -233,9 +263,26 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
         formData.append('currency', currency);
       }
 
+      // Get authentication token if available (for Supabase Edge Functions)
+      let authHeaders: HeadersInit = {};
+      if (USE_EDGE_FUNCTION) {
+        try {
+          const { data: { session } } = await supabase.auth.getSession();
+          if (session?.access_token) {
+            authHeaders = {
+              Authorization: `Bearer ${session.access_token}`,
+            };
+          }
+        } catch (authError) {
+          // Silently fail - Edge Function can work without auth
+          console.warn('Failed to get auth token:', authError);
+        }
+      }
+
       // On React Native, don't set Content-Type header - let the system set it with boundary
       const headers: HeadersInit = {
         Accept: 'application/json',
+        ...authHeaders,
       };
 
       // Only set Content-Type on web
@@ -243,7 +290,7 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
         // FormData will be handled automatically by fetch on web
       }
 
-      const response = await fetchWithTimeout(`${API_URL}/api/analyze-image`, {
+      const response = await fetchWithTimeout(endpointUrl, {
         method: 'POST',
         body: formData,
         headers,
@@ -254,8 +301,17 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       console.log(`[API] Response status: ${response.status} ${response.statusText}`);
 
       if (!response.ok) {
-        const message = await response.text();
-        const error = new Error(message || 'Failed to analyze photo. Please try again.');
+        // Try to parse error response as JSON (Supabase Edge Functions return JSON errors)
+        let errorMessage = 'Failed to analyze photo. Please try again.';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.detail || errorData.error || errorData.message || errorMessage;
+        } catch {
+          // If JSON parsing fails, try as text
+          const text = await response.text();
+          errorMessage = text || errorMessage;
+        }
+        const error = new Error(errorMessage);
         lastError = error;
 
         // Check if this error is retryable
