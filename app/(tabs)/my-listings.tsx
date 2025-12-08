@@ -1,3 +1,4 @@
+import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -13,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { trackEvent } from '@/utils/analytics';
 import { formatListingText } from '@/utils/listingFormatter';
 import { deleteListing as deleteListingApi, getMyListings } from '@/utils/listings-api';
 
@@ -34,6 +36,7 @@ export default function MyListingsScreen() {
   const [listings, setListings] = useState<Listing[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [copySuccessId, setCopySuccessId] = useState<string | null>(null);
 
   const loadListings = useCallback(async () => {
     if (!user) {
@@ -92,9 +95,24 @@ export default function MyListingsScreen() {
     );
   };
 
-  const handleListingPress = (listing: Listing) => {
+  const handleListingPress = async (listing: Listing) => {
+    // Copy listing text to clipboard
+    const listingText = formatListingText({
+      title: listing.title,
+      price: (listing.price_cents / 100).toString(),
+      description: listing.description,
+      condition: listing.condition || '',
+      location: '',
+      currency: listing.currency || '$',
+    });
+    await Clipboard.setStringAsync(listingText);
+    trackEvent('listing_copied', { source: 'my-listings' });
+    setCopySuccessId(listing.id);
+    setTimeout(() => setCopySuccessId(null), 2000);
+  };
+
+  const handleListingLongPress = (listing: Listing) => {
     // Navigate to preview/edit screen
-    // We'll need to adapt this to work with the new backend structure
     router.push({
       pathname: '/(tabs)/listing-preview',
       params: {
@@ -163,14 +181,17 @@ export default function MyListingsScreen() {
                 location: '',
                 currency: listing.currency || '$',
               });
+              const isCopied = copySuccessId === listing.id;
 
               return (
                 <Pressable
                   key={listing.id}
                   onPress={() => handleListingPress(listing)}
+                  onLongPress={() => handleListingLongPress(listing)}
                   style={({ pressed }) => [
                     styles.listingCard,
                     pressed && styles.listingCardPressed,
+                    isCopied && styles.listingCardCopied,
                   ]}>
                   {listing.image_url ? (
                     <Image
@@ -184,17 +205,23 @@ export default function MyListingsScreen() {
                       <Text style={styles.listingTitle} numberOfLines={1}>
                         {listing.title || 'Untitled listing'}
                       </Text>
-                      <Pressable
-                        onPress={() => handleDeleteListing(listing)}
-                        style={styles.deleteButton}>
-                        <Text style={styles.deleteButtonText}>🗑️</Text>
-                      </Pressable>
+                      <View style={styles.listingHeaderActions}>
+                        {isCopied && <Text style={styles.copiedBadge}>Copied!</Text>}
+                        <Pressable
+                          onPress={() => handleDeleteListing(listing)}
+                          style={styles.deleteButton}>
+                          <Text style={styles.deleteButtonText}>🗑️</Text>
+                        </Pressable>
+                      </View>
                     </View>
                     <Text style={styles.listingText} numberOfLines={3}>
                       {listingText}
                     </Text>
                     <Text style={styles.listingDate}>
                       {new Date(listing.created_at).toLocaleDateString()}
+                    </Text>
+                    <Text style={styles.listingCardHint}>
+                      Tap to copy • Long press to edit
                     </Text>
                   </View>
                 </Pressable>
@@ -269,6 +296,10 @@ const styles = StyleSheet.create({
   listingCardPressed: {
     opacity: 0.8,
   },
+  listingCardCopied: {
+    borderColor: '#16A34A',
+    backgroundColor: '#F0FDF4',
+  },
   listingImage: {
     width: '100%',
     height: 200,
@@ -281,6 +312,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  listingHeaderActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  copiedBadge: {
+    fontSize: 12,
+    color: '#16A34A',
+    fontWeight: '600',
   },
   listingTitle: {
     fontSize: 18,
@@ -303,6 +344,13 @@ const styles = StyleSheet.create({
   listingDate: {
     fontSize: 12,
     color: '#94A3B8',
+    marginBottom: 4,
+  },
+  listingCardHint: {
+    fontSize: 11,
+    color: '#64748B',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   signInCard: {
     backgroundColor: '#FFFFFF',

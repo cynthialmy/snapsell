@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
     Alert,
     Pressable,
@@ -27,11 +27,7 @@ export default function UpgradeScreen() {
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
 
-  useEffect(() => {
-    loadQuota();
-  }, [user]);
-
-  const loadQuota = async () => {
+  const loadQuota = useCallback(async () => {
     if (!user) {
       setLoading(false);
       return;
@@ -49,7 +45,14 @@ export default function UpgradeScreen() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [user]);
+
+  // Reload quota when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadQuota();
+    }, [loadQuota])
+  );
 
   const handlePurchase = async (productId: string, amount?: number, isSubscription: boolean = false) => {
     if (!user) {

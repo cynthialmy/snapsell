@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
     Alert,
     Pressable,
@@ -40,8 +40,14 @@ export default function SettingsScreen() {
 
   useEffect(() => {
     loadUserPreferences();
-    loadQuota();
   }, [user]);
+
+  // Reload quota when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      loadQuota();
+    }, [loadQuota])
+  );
 
   const loadUserPreferences = async () => {
     const prefs = await loadPreferences();
@@ -54,7 +60,7 @@ export default function SettingsScreen() {
     }
   };
 
-  const loadQuota = async () => {
+  const loadQuota = useCallback(async () => {
     if (!user) {
       setQuotaLoading(false);
       return;
@@ -74,7 +80,7 @@ export default function SettingsScreen() {
     } finally {
       setQuotaLoading(false);
     }
-  };
+  }, [user]);
 
   const saveUserPreferences = async () => {
     const prefs: UserPreferences = {

@@ -326,6 +326,31 @@ export async function getListingBySlug(slug: string) {
 }
 
 /**
+ * Get listing by ID (requires authentication)
+ */
+export async function getListingById(listingId: string) {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('Not authenticated');
+    }
+
+    const { data: listing, error } = await supabase
+      .from('listings')
+      .select('*')
+      .eq('id', listingId)
+      .single();
+
+    if (error) throw error;
+
+    return { listing, error: null };
+  } catch (error: any) {
+    console.error('Get listing by ID error:', error);
+    return { listing: null, error };
+  }
+}
+
+/**
  * Get user's listings
  */
 export async function getMyListings() {

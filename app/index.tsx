@@ -1,6 +1,4 @@
-import * as Clipboard from 'expo-clipboard';
 import * as FileSystem from 'expo-file-system/legacy';
-import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
@@ -22,7 +20,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
-import { deleteListing, loadListings, saveListing, type SavedListing } from '@/utils/listings';
+import { saveListing } from '@/utils/listings';
 import { checkQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
 
@@ -68,8 +66,6 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [previousListings, setPreviousListings] = useState<SavedListing[]>([]);
-  const [copySuccessId, setCopySuccessId] = useState<string | null>(null);
   const [quota, setQuota] = useState<{ used: number; limit: number; remaining: number } | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(false);
 
@@ -129,12 +125,12 @@ export default function HomeScreen() {
         generated_text: truncatedText,
       });
 
-      // If user is authenticated, upload image and create listing immediately
+      // Upload image immediately so it's available when user saves
+      // But don't create the listing until user explicitly saves
       let storagePath: string | undefined = undefined;
-      let backendListingId: string | undefined = undefined;
       if (user) {
         try {
-          console.log('[Image Analysis] Uploading image immediately after analysis...');
+          console.log('[Image Analysis] Uploading image for future save...');
 
           // Convert image to base64
           let base64Image: string | null = null;
@@ -156,50 +152,24 @@ export default function HomeScreen() {
           }
 
           if (base64Image) {
-            const { uploadImage, createListing } = await import('@/utils/listings-api');
+            const { uploadImage } = await import('@/utils/listings-api');
             const { data: uploadData, error: uploadError } = await uploadImage(base64Image, asset.mimeType || 'image/jpeg');
             if (!uploadError && uploadData?.storage_path) {
               storagePath = uploadData.storage_path;
               console.log('[Image Analysis] Image uploaded successfully, storage_path:', storagePath);
-
-              // Auto-create listing in Supabase immediately
-              if (storagePath) {
-                try {
-                  console.log('[Image Analysis] Auto-creating listing in Supabase...');
-                  const priceCents = listing.price ? Math.round(parseFloat(listing.price) * 100) : undefined;
-                  const { listing: backendListing, error: createError } = await createListing({
-                    title: listing.title || 'Untitled Listing',
-                    description: listing.description || '',
-                    price_cents: priceCents,
-                    currency: 'USD', // Default, will be updated when user copies
-                    condition: listing.condition || undefined,
-                    storage_path: storagePath,
-                    visibility: 'private',
-                  });
-
-                  if (createError) {
-                    console.warn('[Image Analysis] Failed to auto-create listing:', createError);
-                    // Continue anyway - listing will be created when user clicks copy
-                  } else if (backendListing) {
-                    backendListingId = backendListing.id;
-                    console.log('[Image Analysis] Listing auto-created successfully, ID:', backendListingId);
-                  }
-                } catch (createError) {
-                  console.warn('[Image Analysis] Error auto-creating listing:', createError);
-                  // Continue anyway - listing will be created when user clicks copy
-                }
-              }
             } else {
-              console.warn('[Image Analysis] Failed to upload image immediately:', uploadError);
+              console.warn('[Image Analysis] Failed to upload image:', uploadError);
             }
           }
         } catch (error) {
-          console.warn('[Image Analysis] Error uploading image immediately:', error);
-          // Continue anyway - we'll try again when copying
+          console.warn('[Image Analysis] Error uploading image:', error);
+          // Continue anyway - will try again when saving
         }
       }
 
-      navigateToPreview({ listing, imageUri: asset.uri, storagePath, backendListingId });
+      // Don't auto-create listings - only create when user explicitly saves
+      // This prevents "Untitled Listing" entries from being created
+      navigateToPreview({ listing, imageUri: asset.uri, storagePath });
 
       // Reload quota after successful listing creation
       if (user) {
@@ -375,6 +345,11 @@ export default function HomeScreen() {
       ...payload,
       listingId,
     }));
+    console.log('[Navigate] Payload being sent:', {
+      hasStoragePath: !!payload.storagePath,
+      storagePath: payload.storagePath,
+      hasImageUri: !!payload.imageUri,
+    });
     router.push({
       pathname: '/(tabs)/listing-preview',
       params: { payload: params },
@@ -417,70 +392,16 @@ export default function HomeScreen() {
     }
   }, [user]);
 
-  // Load previous listings on mount and when screen comes into focus
-  const loadPreviousListings = useCallback(async () => {
-    const listings = await loadListings();
-    setPreviousListings(listings);
-  }, []);
-
   useFocusEffect(
     useCallback(() => {
-      loadPreviousListings();
       loadQuota();
-    }, [loadPreviousListings, loadQuota]),
+    }, [loadQuota]),
   );
 
   const sampleListingText = useMemo(
     () => formatListingText({ ...sampleListing, currency: '$' }),
     [],
   );
-
-  const handleListingTap = async (savedListing: SavedListing) => {
-    const listingText = formatListingText({
-      ...savedListing.listing,
-      currency: savedListing.currency,
-    });
-    await Clipboard.setStringAsync(listingText);
-    trackEvent('listing_copied', { source: 'home' });
-    setCopySuccessId(savedListing.id);
-    setTimeout(() => setCopySuccessId(null), 2000);
-  };
-
-  const handleListingLongPress = (savedListing: SavedListing) => {
-    // Navigate to preview with the saved listing
-    const payload = {
-      listing: savedListing.listing,
-      imageUri: savedListing.imageUri,
-      listingId: savedListing.id,
-    };
-    const params = encodeURIComponent(JSON.stringify(payload));
-    router.push({
-      pathname: '/(tabs)/listing-preview',
-      params: { payload: params },
-    });
-  };
-
-  const handleDeleteListing = (savedListing: SavedListing) => {
-    Alert.alert(
-      'Delete listing',
-      `Are you sure you want to delete "${savedListing.listing.title || 'this listing'}"?`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-        },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            trackEvent('listing_deleted', { listing_id: savedListing.id });
-            await deleteListing(savedListing.id);
-            await loadPreviousListings();
-          },
-        },
-      ],
-    );
-  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -536,67 +457,10 @@ export default function HomeScreen() {
             {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
           </View>
 
-          {user && previousListings.length > 0 ? (
-            // Authenticated users: show local listings (will be migrated to backend)
-            <>
-              <Text style={styles.previousListingsHeader}>Previous listings</Text>
-              {previousListings.map(savedListing => {
-                const listingText = formatListingText({
-                  ...savedListing.listing,
-                  currency: savedListing.currency,
-                });
-                const isCopied = copySuccessId === savedListing.id;
-                return (
-                  <Pressable
-                    key={savedListing.id}
-                    onPress={() => handleListingTap(savedListing)}
-                    onLongPress={() => handleListingLongPress(savedListing)}
-                    style={({ pressed }) => [
-                      styles.listingCard,
-                      pressed && styles.listingCardPressed,
-                      isCopied && styles.listingCardCopied,
-                    ]}>
-                    {savedListing.imageUri ? (
-                      <Image
-                        source={{ uri: savedListing.imageUri }}
-                        style={styles.listingCardImage}
-                        contentFit="cover"
-                        accessibilityLabel={savedListing.listing.title || 'Listing image'}
-                      />
-                    ) : null}
-                    <View style={styles.listingCardHeader}>
-                      <Text style={styles.listingCardTitle} numberOfLines={1}>
-                        {savedListing.listing.title || 'Untitled listing'}
-                      </Text>
-                      <View style={styles.listingCardActions}>
-                        {isCopied && <Text style={styles.copiedBadge}>Copied!</Text>}
-                        <Pressable
-                          onPress={() => handleDeleteListing(savedListing)}
-                          style={({ pressed }) => [
-                            styles.deleteButton,
-                            pressed && styles.deleteButtonPressed,
-                          ]}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-                          <Text style={styles.deleteButtonText}>🗑️</Text>
-                        </Pressable>
-                      </View>
-                    </View>
-                    <Text style={styles.listingCardText} numberOfLines={6}>
-                      {listingText}
-                    </Text>
-                    <Text style={styles.listingCardHint}>
-                      Tap to copy • Long press to edit
-                    </Text>
-                  </Pressable>
-                );
-              })}
-            </>
-          ) : (
-            <View style={styles.samplePreviewCard}>
-              <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
-              <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
-            </View>
-          )}
+          <View style={styles.samplePreviewCard}>
+            <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
+            <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
+          </View>
         </View>
       </ScrollView>
       <SnappyLoading visible={isAnalyzing} />
@@ -730,92 +594,6 @@ const styles = StyleSheet.create({
   },
   ctaSection: {
     gap: 12,
-  },
-  previousListingsHeader: {
-    fontSize: 14,
-    color: '#475569',
-    fontWeight: '600',
-    marginTop: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  listingCard: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 14,
-    padding: 18,
-    marginTop: 8,
-    alignSelf: 'stretch',
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    shadowColor: '#93C5FD',
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-    overflow: 'hidden',
-  },
-  listingCardImage: {
-    width: '100%',
-    height: 200,
-    borderRadius: 12,
-    marginBottom: 12,
-  },
-  listingCardPressed: {
-    opacity: 0.8,
-    transform: [{ scale: 0.98 }],
-  },
-  listingCardCopied: {
-    borderColor: '#16A34A',
-    backgroundColor: '#F0FDF4',
-  },
-  listingCardHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 8,
-  },
-  listingCardActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  deleteButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  deleteButtonPressed: {
-    opacity: 0.6,
-  },
-  deleteButtonText: {
-    fontSize: 18,
-  },
-  listingCardTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-    flex: 1,
-  },
-  copiedBadge: {
-    fontSize: 12,
-    color: '#16A34A',
-    fontWeight: '600',
-    marginLeft: 8,
-  },
-  listingCardText: {
-    fontSize: 15,
-    color: '#1F2937',
-    lineHeight: 22,
-    fontFamily: Platform.select({
-      ios: 'MarkerFelt-Wide',
-      android: 'casual',
-      default: 'Comic Sans MS',
-    }),
-  },
-  listingCardHint: {
-    fontSize: 11,
-    color: '#64748B',
-    marginTop: 8,
-    fontStyle: 'italic',
   },
   quotaCard: {
     backgroundColor: '#EFF6FF',
