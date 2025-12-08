@@ -18,14 +18,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { LoginGateModal } from '@/components/LoginGateModal';
+import { QuotaModal } from '@/components/QuotaModal';
+import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent } from '@/utils/analytics';
 import type { ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing, updateListing } from '@/utils/listings';
+import { checkQuota, createListing, updateListing as updateListingApi, uploadImage } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
-import * as Sharing from 'expo-sharing';
-import { useAuth } from '@/contexts/AuthContext';
-import { createListing, updateListing as updateListingApi, uploadImage } from '@/utils/listings-api';
+import { checkQuotaModalShouldShow, getQuotaPeriod, markQuotaModalDismissed } from '@/utils/quota';
 import * as FileSystem from 'expo-file-system/legacy';
 
 type PreviewPayload = {
@@ -51,9 +53,17 @@ export default function ListingPreviewScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ payload?: string }>();
   const { user } = useAuth();
-  const [shareLink, setShareLink] = useState<string | null>(null);
-  const [shareSuccess, setShareSuccess] = useState(false);
   const [backendListingId, setBackendListingId] = useState<string | null>(null);
+
+  // Login gate state
+  const [showLoginGate, setShowLoginGate] = useState(false);
+
+  // Quota modal state
+  const [showQuotaModal, setShowQuotaModal] = useState(false);
+  const [quotaCount, setQuotaCount] = useState(0);
+
+  // Auto-save checkbox state
+  const [autoSaveListing, setAutoSaveListing] = useState(false);
 
   const payload = useMemo<PreviewPayload | null>(() => {
     if (!params.payload) return null;
@@ -187,6 +197,10 @@ export default function ListingPreviewScreen() {
         if (prefs.currency) {
           setCurrency(prefs.currency);
         }
+        // Load auto-save preference
+        if (prefs.autoSaveListing !== undefined) {
+          setAutoSaveListing(prefs.autoSaveListing);
+        }
       }
 
       // Initialize tracking with initial values after preferences are loaded
@@ -246,13 +260,38 @@ export default function ListingPreviewScreen() {
         shippingAvailable,
         pickupNotes,
         currency,
+        autoSaveListing,
       };
       await savePreferences(prefs);
     };
     // Debounce saves to avoid too many writes
     const timer = setTimeout(savePrefs, 500);
     return () => clearTimeout(timer);
-  }, [location, pickupAvailable, shippingAvailable, pickupNotes, currency]);
+  }, [location, pickupAvailable, shippingAvailable, pickupNotes, currency, autoSaveListing]);
+
+  // When user logs in after trying to check the box, check it automatically
+  useEffect(() => {
+    if (user && showLoginGate) {
+      // User just logged in, check the box and close login gate
+      setAutoSaveListing(true);
+      setShowLoginGate(false);
+    }
+  }, [user, showLoginGate]);
+
+  // Auto-save listing when checkbox is checked and user is authenticated
+  // Use a ref to track if we've already saved for this checkbox state
+  const hasAutoSavedRef = useRef(false);
+  useEffect(() => {
+    if (autoSaveListing && user && !hasAutoSavedRef.current) {
+      // User checked the box and is authenticated, save the listing
+      hasAutoSavedRef.current = true;
+      performSave();
+    } else if (!autoSaveListing) {
+      // Reset when unchecked
+      hasAutoSavedRef.current = false;
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSaveListing, user]);
 
 
   if (!payload) {
@@ -386,6 +425,39 @@ export default function ListingPreviewScreen() {
 
     trackEvent('listing_copied', properties);
 
+    setCopySuccess(true);
+  };
+
+  // Handle checkbox toggle - checks auth and shows login gate if needed
+  const handleAutoSaveToggle = async (value: boolean) => {
+    console.log('[AutoSave] Toggle attempt:', { value, user: !!user });
+
+    if (!user && value) {
+      // User wants to check the box but is not authenticated
+      console.log('[AutoSave] Showing login gate');
+      setShowLoginGate(true);
+      trackEvent('auto_save_toggle_attempt', { authenticated: false });
+      return; // Don't update checkbox state
+    }
+
+    // User is authenticated or unchecking, update preference
+    console.log('[AutoSave] Updating preference:', value);
+    setAutoSaveListing(value);
+    trackEvent('auto_save_toggle', { enabled: value, authenticated: !!user });
+
+    // If checking and authenticated, save immediately
+    if (value && user) {
+      performSave();
+    }
+  };
+
+  // Perform the actual save operation
+  const performSave = async () => {
+    if (!user) {
+      // Should not happen, but handle gracefully
+      return;
+    }
+
     // Build current listing data
     const currentListing: ListingData = {
       title,
@@ -398,73 +470,71 @@ export default function ListingPreviewScreen() {
       pickupNotes,
     };
 
-    // Save or update listing
-    if (listingId) {
-      // Update existing listing
-      await updateListing(listingId, currentListing, currency);
+    try {
+      // Save or update listing
+      if (listingId) {
+        // Update existing listing
+        await updateListing(listingId, currentListing, currency);
 
-      // Also update in backend if user is authenticated and listing exists in backend
-      if (user && backendListingId) {
-        const priceCents = Math.round(parseFloat(price || '0') * 100);
-        await updateListingApi(backendListingId, {
-          title,
-          description,
-          price_cents: priceCents,
-          currency: currency === '$' ? 'USD' : currency === '€' ? 'EUR' : currency === '£' ? 'GBP' : currency === '¥' ? 'JPY' : 'USD',
-          condition,
-        });
-      }
-    } else {
-      // Save new listing (user modified a newly generated listing)
-      let savedListingId: string | null = null;
+        // Also update in backend if listing exists in backend
+        if (backendListingId) {
+          const priceCents = Math.round(parseFloat(price || '0') * 100);
+          await updateListingApi(backendListingId, {
+            title,
+            description,
+            price_cents: priceCents,
+            currency: currency === '$' ? 'USD' : currency === '€' ? 'EUR' : currency === '£' ? 'GBP' : currency === '¥' ? 'JPY' : 'USD',
+            condition,
+          });
+        }
+      } else {
+        // Save new listing (user modified a newly generated listing)
+        let savedListingId: string | null = null;
 
-      // If user is authenticated, save to backend
-      if (user) {
-        try {
-          // Check if listing was already auto-created in backend
-          if (backendListingId) {
-            // Update existing listing in backend
-            console.log('[Listing Save] Updating existing backend listing:', backendListingId);
-            const priceCents = Math.round(parseFloat(price || '0') * 100);
-            let currencyCode = 'USD';
-            if (currency === '€') {
-              currencyCode = 'EUR';
-            } else if (currency === '£') {
-              currencyCode = 'GBP';
-            } else if (currency === '¥') {
-              currencyCode = 'JPY';
-            } else if (currency === 'kr') {
-              currencyCode = 'NOK';
-            }
+        // Check if listing was already auto-created in backend
+        if (backendListingId) {
+          // Update existing listing in backend
+          console.log('[Listing Save] Updating existing backend listing:', backendListingId);
+          const priceCents = Math.round(parseFloat(price || '0') * 100);
+          let currencyCode = 'USD';
+          if (currency === '€') {
+            currencyCode = 'EUR';
+          } else if (currency === '£') {
+            currencyCode = 'GBP';
+          } else if (currency === '¥') {
+            currencyCode = 'JPY';
+          } else if (currency === 'kr') {
+            currencyCode = 'NOK';
+          }
 
-            const { listing: updatedListing, error: updateError } = await updateListingApi(backendListingId, {
-              title,
-              description,
-              price_cents: priceCents,
-              currency: currencyCode,
-              condition,
-            });
+          const { listing: updatedListing, error: updateError } = await updateListingApi(backendListingId, {
+            title,
+            description,
+            price_cents: priceCents,
+            currency: currencyCode,
+            condition,
+          });
 
-            if (updateError) {
-              console.error('[Listing Save] Failed to update backend listing:', updateError);
-              Alert.alert(
-                'Update Failed',
-                `Could not update listing: ${updateError.message || 'Unknown error'}.`,
-                [{ text: 'OK' }]
-              );
-            } else {
-              console.log('[Listing Save] Successfully updated backend listing');
-            }
-
-            // Save locally as well
-            savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+          if (updateError) {
+            console.error('[Listing Save] Failed to update backend listing:', updateError);
+            Alert.alert(
+              'Update Failed',
+              `Could not update listing: ${updateError.message || 'Unknown error'}.`,
+              [{ text: 'OK' }]
+            );
           } else {
-            // Create new listing in backend
-            console.log('[Listing Save] Starting backend save for authenticated user');
+            console.log('[Listing Save] Successfully updated backend listing');
+          }
 
-            // Use existing storage_path if available (image was uploaded during analysis)
-            // Otherwise, try to upload the image now
-            let storagePath = payload?.storagePath || '';
+          // Save locally as well
+          savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
+        } else {
+          // Create new listing in backend
+          console.log('[Listing Save] Starting backend save for authenticated user');
+
+          // Use existing storage_path if available (image was uploaded during analysis)
+          // Otherwise, try to upload the image now
+          let storagePath = payload?.storagePath || '';
 
           // Only try to upload if we don't already have a storage_path
           if (!storagePath && payload?.imageUri) {
@@ -509,14 +579,12 @@ export default function ListingPreviewScreen() {
                   console.log('[Listing Save] Image uploaded successfully, storage_path:', storagePath);
                 } else {
                   console.error('[Listing Save] Failed to upload image:', uploadError);
-                  // Don't show alert here - we'll show a better one after checking storagePath
                 }
               } else {
                 console.warn('[Listing Save] No base64 image available for upload');
               }
             } catch (imageError: any) {
               console.error('[Listing Save] Error processing image:', imageError);
-              // Continue without image - backend may allow listings without images
             }
           } else if (!storagePath) {
             console.log('[Listing Save] No image URI provided and no existing storage_path');
@@ -541,11 +609,9 @@ export default function ListingPreviewScreen() {
           }
 
           // Check if storage_path is required and available
-          // Backend requires storage_path, so we can't create listing without image
           if (!storagePath) {
             console.error('[Listing Save] Cannot create listing: storage_path is required but image upload failed or no image available');
 
-            // Determine the reason for failure
             let errorMessage = 'Unable to upload image. ';
             if (!payload?.imageUri) {
               errorMessage += 'No image was provided.';
@@ -598,7 +664,6 @@ export default function ListingPreviewScreen() {
                   ]
                 );
               } else {
-                // Show error to user
                 const errorMessage = createError.message || 'Unknown error';
                 console.warn('[Listing Save] Failed to save listing to backend, saving locally instead:', createError);
                 Alert.alert(
@@ -606,7 +671,6 @@ export default function ListingPreviewScreen() {
                   `Could not save to backend: ${errorMessage}. Listing saved locally only.`,
                   [{ text: 'OK' }]
                 );
-                // Fall back to local storage
                 savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
               }
             } else if (backendListing) {
@@ -617,166 +681,47 @@ export default function ListingPreviewScreen() {
               if (backendListing.share_slug) {
                 setShareLink(backendListing.share_slug);
               }
+
+              // Check quota and show modal if needed
+              try {
+                const { quota } = await checkQuota();
+                if (quota && user?.id) {
+                  const shouldShow = await checkQuotaModalShouldShow(user.id, quota.used);
+                  if (shouldShow) {
+                    setQuotaCount(quota.used);
+                    setShowQuotaModal(true);
+                  }
+                }
+              } catch (quotaError) {
+                console.warn('[Listing Save] Failed to check quota for modal:', quotaError);
+                // Don't block save if quota check fails
+              }
+
+              trackEvent('listing_saved', { listing_id: backendListing.id, user_id: user.id });
             } else {
               console.warn('[Listing Save] No listing returned from backend, but no error either');
-              // Fall back to local storage
               savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
             }
           }
-          }
-        } catch (error: any) {
-          console.error('[Listing Save] Unexpected error saving to backend:', error);
-          Alert.alert(
-            'Save Error',
-            `Error saving to backend: ${error?.message || 'Unknown error'}. Listing saved locally only.`,
-            [{ text: 'OK' }]
-          );
-          // Fall back to local storage
-          savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
-        }
-      } else {
-        // User not authenticated, save locally only
-        savedListingId = await saveListing(currentListing, currency, payload?.imageUri || '');
-      }
-
-      if (savedListingId) {
-        setListingId(savedListingId);
-      }
-    }
-
-    setCopySuccess(true);
-  };
-
-  const handleShare = async () => {
-    if (!user) {
-      Alert.alert('Sign in required', 'Please sign in to share listings.');
-      return;
-    }
-
-    try {
-      // Check if backend is configured
-      const EDGE_FUNCTION_BASE = process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL ||
-        `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1`;
-
-      if (!EDGE_FUNCTION_BASE || EDGE_FUNCTION_BASE.includes('YOUR_') || EDGE_FUNCTION_BASE.includes('your_')) {
-        Alert.alert(
-          'Backend not configured',
-          'Sharing requires backend setup. Please configure your Supabase Edge Functions.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-
-      // First, ensure listing is saved to backend
-      const currentListing: ListingData = {
-        title,
-        price,
-        description,
-        condition,
-        location,
-        pickupAvailable,
-        shippingAvailable,
-        pickupNotes,
-      };
-
-      let listingIdToShare = backendListingId;
-
-      // If no backend listing ID, create one
-      if (!listingIdToShare) {
-        // Convert price to cents
-        const priceCents = Math.round(parseFloat(price || '0') * 100);
-
-        // For now, we'll need to upload the image first
-        // This is a simplified version - in production, you'd want to handle image upload properly
-        const { listing: newListing, error: createError } = await createListing({
-          title,
-          description,
-          price_cents: priceCents,
-          currency: currency === '$' ? 'USD' : currency,
-          condition,
-          storage_path: '', // This would need to be set from image upload
-          visibility: 'shared',
-        });
-
-        if (createError) {
-          if (createError.code === 'QUOTA_EXCEEDED') {
-            Alert.alert(
-              'Quota Exceeded',
-              'You\'ve reached your listing limit. Upgrade to share more listings.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                { text: 'Upgrade', onPress: () => router.push('/(tabs)/upgrade') },
-              ]
-            );
-          } else {
-            // Check if it's a server error (backend not available)
-            const errorMessage = createError.message || '';
-            if (errorMessage.includes('Internal server error') || errorMessage.includes('Failed to fetch')) {
-              Alert.alert(
-                'Backend unavailable',
-                'Unable to connect to the backend. Please check your configuration or try again later.',
-                [{ text: 'OK' }]
-              );
-            } else {
-              Alert.alert('Error', 'Failed to create listing for sharing. Please try again.');
-            }
-          }
-          return;
         }
 
-        if (newListing) {
-          listingIdToShare = newListing.id;
-          setBackendListingId(newListing.id);
-          if (newListing.share_slug) {
-            setShareLink(newListing.share_slug);
-          }
-        }
-      } else {
-        // Update existing listing
-        const priceCents = Math.round(parseFloat(price || '0') * 100);
-        const { error: updateError } = await updateListingApi(listingIdToShare, {
-          title,
-          description,
-          price_cents: priceCents,
-          currency: currency === '$' ? 'USD' : currency,
-          condition,
-        });
-
-        if (updateError) {
-          console.warn('Failed to update listing for share:', updateError);
-          // Continue anyway - we can still share with existing data
+        if (savedListingId) {
+          setListingId(savedListingId);
         }
       }
 
-      // Generate share link
-      const shareBaseUrl = process.env.EXPO_PUBLIC_SHARE_BASE_URL || 'snapsell://share';
-      const slug = shareLink || listingIdToShare; // Use share_slug if available, otherwise use ID
-      const shareUrl = `${shareBaseUrl}/${slug}`;
-
-      // Copy to clipboard and show native share sheet
-      await Clipboard.setStringAsync(shareUrl);
-      setShareSuccess(true);
-      setTimeout(() => setShareSuccess(false), 3000);
-
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(shareUrl);
-      }
-
-      trackEvent('listing_shared', { listing_id: listingIdToShare });
+      // Don't show alert for auto-save (silent save)
+      // Only show success message if explicitly saving
     } catch (error: any) {
-      console.error('Share error:', error);
-      const errorMessage = error?.message || '';
-      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('network')) {
-        Alert.alert(
-          'Connection error',
-          'Unable to connect to the backend. Please check your internet connection and try again.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert('Error', 'Failed to share listing. Please try again.');
-      }
+      console.error('[Listing Save] Unexpected error saving:', error);
+      Alert.alert(
+        'Save Error',
+        `Error saving listing: ${error?.message || 'Unknown error'}.`,
+        [{ text: 'OK' }]
+      );
     }
   };
+
 
   const handleReset = () => {
     setCopySuccess(false);
@@ -1103,20 +1048,21 @@ export default function ListingPreviewScreen() {
             <Text style={styles.success}>Copied! Paste it into your marketplace.</Text>
           ) : null}
 
-          {shareSuccess ? (
-            <Text style={styles.success}>Share link copied to clipboard!</Text>
-          ) : null}
-
-          {user && (
-            <Pressable
-              onPress={handleShare}
-              style={({ pressed }) => [
-                styles.shareButton,
-                pressed && styles.shareButtonPressed,
-              ]}>
-              <Text style={styles.shareButtonText}>Share listing</Text>
-            </Pressable>
-          )}
+          <View style={styles.autoSaveSection}>
+            <View style={styles.toggleRow}>
+              <Text style={styles.toggleLabel}>Save this listing for future</Text>
+              <Switch
+                value={autoSaveListing}
+                onValueChange={handleAutoSaveToggle}
+                disabled={false}
+              />
+            </View>
+            {!user && (
+              <Text style={styles.autoSaveHint}>
+                Sign in to save your listings
+              </Text>
+            )}
+          </View>
 
           <Pressable
             onPress={handleReset}
@@ -1125,6 +1071,38 @@ export default function ListingPreviewScreen() {
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      <LoginGateModal
+        visible={showLoginGate}
+        context="save"
+        onDismiss={() => {
+          setShowLoginGate(false);
+        }}
+        onLoginMethod={(method) => {
+          // Method selection is handled in the modal
+          // After login, user can check the checkbox
+        }}
+        onJustCopy={() => {
+          handleCopy();
+        }}
+      />
+
+      <QuotaModal
+        visible={showQuotaModal}
+        count={quotaCount}
+        period={getQuotaPeriod()}
+        onUpgrade={() => {
+          router.push('/(tabs)/upgrade');
+        }}
+        onContinueFree={async () => {
+          if (user?.id) {
+            await markQuotaModalDismissed(user.id);
+          }
+        }}
+        onDismiss={() => {
+          setShowQuotaModal(false);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -1459,19 +1437,18 @@ const styles = StyleSheet.create({
     color: '#312E81',
     fontWeight: '600',
   },
-  shareButton: {
-    backgroundColor: '#4338CA',
-    paddingVertical: 16,
-    borderRadius: 14,
-    alignItems: 'center',
+  autoSaveSection: {
+    marginTop: 16,
+    padding: 16,
+    backgroundColor: '#F8FAFC',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  autoSaveHint: {
+    fontSize: 12,
+    color: '#64748B',
     marginTop: 8,
-  },
-  shareButtonPressed: {
-    opacity: 0.85,
-  },
-  shareButtonText: {
-    color: '#FFFFFF',
-    fontWeight: '600',
-    fontSize: 16,
+    fontStyle: 'italic',
   },
 });

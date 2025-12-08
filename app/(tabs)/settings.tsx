@@ -1,15 +1,15 @@
 import { useRouter } from 'expo-router';
 import { useEffect, useState } from 'react';
 import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -141,10 +141,10 @@ export default function SettingsScreen() {
           </View>
         )}
 
-        {user && (
-          <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Usage & Quota</Text>
-            {quotaLoading ? (
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Usage & Quota</Text>
+          {user ? (
+            quotaLoading ? (
               <Text style={styles.quotaText}>Loading...</Text>
             ) : quota ? (
               <View style={styles.quotaContainer}>
@@ -162,9 +162,21 @@ export default function SettingsScreen() {
               </View>
             ) : (
               <Text style={styles.quotaText}>Unable to load quota</Text>
-            )}
-          </View>
-        )}
+            )
+          ) : (
+            <View style={styles.quotaContainer}>
+              <Text style={styles.quotaText}>Sign in to view your listing quota and usage</Text>
+              <Text style={styles.quotaSubtext}>
+                Free tier includes 3-5 listings
+              </Text>
+              <Pressable
+                onPress={() => router.push('/(auth)/sign-in')}
+                style={styles.signInButton}>
+                <Text style={styles.signInButtonText}>Sign In</Text>
+              </Pressable>
+            </View>
+          )}
+        </View>
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Preferences</Text>
@@ -444,6 +456,19 @@ const styles = StyleSheet.create({
   signOutButtonText: {
     fontSize: 16,
     color: '#DC2626',
+    fontWeight: '600',
+  },
+  signInButton: {
+    backgroundColor: '#4338CA',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  signInButtonText: {
+    color: '#FFFFFF',
+    fontSize: 14,
     fontWeight: '600',
   },
 });

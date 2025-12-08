@@ -1,12 +1,12 @@
 import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -53,7 +53,17 @@ export default function UpgradeScreen() {
 
   const handlePurchase = async (productId: string, amount?: number, isSubscription: boolean = false) => {
     if (!user) {
-      Alert.alert('Sign in required', 'Please sign in to purchase credits or upgrade.');
+      Alert.alert(
+        'Account required',
+        'You need to create an account to purchase credits or upgrade. Sign in to continue.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Sign In',
+            onPress: () => router.push('/(auth)/sign-in'),
+          },
+        ]
+      );
       return;
     }
 

@@ -264,6 +264,7 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       }
 
       // Get authentication token if available (for Supabase Edge Functions)
+      // Note: analyze-image endpoint should work without auth for unauthenticated users
       let authHeaders: HeadersInit = {};
       if (USE_EDGE_FUNCTION) {
         try {
@@ -273,9 +274,10 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
               Authorization: `Bearer ${session.access_token}`,
             };
           }
+          // If no session, don't include auth header - backend should allow unauthenticated access
         } catch (authError) {
-          // Silently fail - Edge Function can work without auth
-          console.warn('Failed to get auth token:', authError);
+          // Silently fail - Edge Function should work without auth for analyze-image
+          console.warn('Failed to get auth token (continuing without auth):', authError);
         }
       }
 

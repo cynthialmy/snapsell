@@ -1,16 +1,16 @@
 import { DarkTheme, DefaultTheme, ThemeProvider } from '@react-navigation/native';
-import * as SplashScreen from 'expo-splash-screen';
+import * as Linking from 'expo-linking';
 import { Stack, useRouter, useSegments } from 'expo-router';
+import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import * as Linking from 'expo-linking';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AnimatedSplash } from '@/components/animated-splash';
+import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { initializePostHog } from '@/utils/analytics';
-import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { parsePaymentCallback, verifyPayment } from '@/utils/payments';
 
 // Prevent the native splash screen from auto-hiding
@@ -27,13 +27,24 @@ function RootLayoutNav() {
 
     const inAuthGroup = segments[0] === '(auth)';
     const inTabsGroup = segments[0] === '(tabs)';
-    const onRootIndex = segments.length === 0 || (segments.length === 1 && segments[0] === 'index');
+    const onListingPreview = inTabsGroup && segments[1] === 'listing-preview';
+    const onShareScreen = segments[0] === 'share';
+    // Check if we're on tabs index (first tab, which is the home screen)
+    // When in tabs group with only one segment, we're on the index tab
+    const onTabsIndex = inTabsGroup && segments.length === 1;
 
+    // Allow unauthenticated access to all tabs - individual screens handle non-logged state
     if (!user && !inAuthGroup) {
-      // Redirect to sign in if not authenticated
-      router.replace('/(auth)/sign-in');
-    } else if (user && (inAuthGroup || onRootIndex)) {
-      // Redirect to tabs if authenticated and in auth group or on root index
+      // If not in tabs group and not on share screen, redirect to tabs index
+      if (!inTabsGroup && !onShareScreen) {
+        router.replace('/(tabs)' as any);
+      }
+      // Allow access to all tabs - screens will show appropriate messages for non-logged users
+    } else if (user && inAuthGroup) {
+      // Redirect to tabs if authenticated and in auth group
+      router.replace('/(tabs)');
+    } else if (user && !inTabsGroup && !inAuthGroup && !onShareScreen) {
+      // Redirect authenticated users from root index to tabs
       router.replace('/(tabs)');
     }
   }, [user, loading, segments]);

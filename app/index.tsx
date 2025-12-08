@@ -536,8 +536,8 @@ export default function HomeScreen() {
             {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
           </View>
 
-          {!user && previousListings.length > 0 ? (
-            // Unauthenticated users: show local listings
+          {user && previousListings.length > 0 ? (
+            // Authenticated users: show local listings (will be migrated to backend)
             <>
               <Text style={styles.previousListingsHeader}>Previous listings</Text>
               {previousListings.map(savedListing => {

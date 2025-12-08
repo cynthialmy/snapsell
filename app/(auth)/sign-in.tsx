@@ -1,15 +1,15 @@
-import { useRouter } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -17,6 +17,7 @@ import { signIn, signInWithMagicLink } from '@/utils/auth';
 
 export default function SignInScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ returnTo?: string }>();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -41,7 +42,12 @@ export default function SignInScreen() {
     }
 
     if (data?.user) {
-      router.replace('/(tabs)');
+      // If we came from listing preview, go back there; otherwise go to tabs
+      if (params.returnTo) {
+        router.replace(params.returnTo as any);
+      } else {
+        router.replace('/(tabs)');
+      }
     }
   };
 
@@ -71,13 +77,28 @@ export default function SignInScreen() {
     }
   };
 
+  const handleClose = () => {
+    // If there's a returnTo param, go to that route
+    if (params.returnTo) {
+      router.replace(params.returnTo as any);
+    } else {
+      // Otherwise, go to tabs index (home screen)
+      router.replace('/(tabs)');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.keyboardView}>
+        <View style={styles.header}>
+          <Pressable onPress={handleClose} style={styles.closeButton}>
+            <Text style={styles.closeButtonText}>✕</Text>
+          </Pressable>
+        </View>
         <ScrollView contentContainerStyle={styles.content}>
-          <Text style={styles.title}>Welcome back</Text>
+          <Text style={styles.title}>Welcome</Text>
           <Text style={styles.subtitle}>Sign in to continue</Text>
 
           {error ? <Text style={styles.error}>{error}</Text> : null}
@@ -162,9 +183,29 @@ const styles = StyleSheet.create({
   keyboardView: {
     flex: 1,
   },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  closeButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#F1F5F9',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonText: {
+    fontSize: 18,
+    color: '#64748B',
+    fontWeight: '600',
+  },
   content: {
     padding: 24,
-    paddingTop: 48,
+    paddingTop: 24,
   },
   title: {
     fontSize: 32,

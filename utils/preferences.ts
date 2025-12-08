@@ -8,6 +8,7 @@ export type UserPreferences = {
   shippingAvailable?: boolean;
   pickupNotes?: string;
   currency?: string;
+  autoSaveListing?: boolean; // Remember user's preference to save listings
 };
 
 export async function savePreferences(preferences: UserPreferences): Promise<void> {

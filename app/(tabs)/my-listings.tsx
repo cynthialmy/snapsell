@@ -1,14 +1,14 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
-  Image,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Image,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -116,9 +116,23 @@ export default function MyListingsScreen() {
   if (!user) {
     return (
       <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
-        <View style={styles.emptyContainer}>
-          <Text style={styles.emptyText}>Please sign in to view your listings</Text>
-        </View>
+        <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+          <Text style={styles.title}>My Listings</Text>
+          <View style={styles.signInCard}>
+            <Text style={styles.signInCardTitle}>Sign in to view your saved listings</Text>
+            <Text style={styles.signInCardDescription}>
+              Create an account to save your listings, access them from anywhere, and never lose your work.
+            </Text>
+            <Pressable
+              onPress={() => router.push('/(auth)/sign-in')}
+              style={({ pressed }) => [
+                styles.signInButton,
+                pressed && styles.signInButtonPressed,
+              ]}>
+              <Text style={styles.signInButtonText}>Sign In</Text>
+            </Pressable>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
@@ -289,5 +303,49 @@ const styles = StyleSheet.create({
   listingDate: {
     fontSize: 12,
     color: '#94A3B8',
+  },
+  signInCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 24,
+    marginTop: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
+    alignItems: 'center',
+  },
+  signInCardTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginBottom: 12,
+    textAlign: 'center',
+  },
+  signInCardDescription: {
+    fontSize: 14,
+    color: '#64748B',
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  signInButton: {
+    backgroundColor: '#4338CA',
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    minWidth: 120,
+  },
+  signInButtonPressed: {
+    opacity: 0.85,
+  },
+  signInButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });
