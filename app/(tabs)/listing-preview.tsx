@@ -4,17 +4,17 @@ import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -384,10 +384,14 @@ export default function ListingPreviewScreen() {
 
   // Auto-save listing when checkbox is checked and user is authenticated
   // Use a ref to track if we've already saved for this checkbox state
+  // Note: The actual save is triggered from handleAutoSaveToggle to avoid timing issues
+  // This useEffect handles the case when auto-save preference is loaded from storage
   const hasAutoSavedRef = useRef(false);
   useEffect(() => {
+    // Only trigger if auto-save is enabled, user is authenticated, and we haven't saved yet
+    // This handles the case when preferences load with auto-save already enabled
     if (autoSaveListing && user && !hasAutoSavedRef.current) {
-      // User checked the box and is authenticated, save the listing
+      // Auto-save was enabled (likely from preferences), save the listing
       hasAutoSavedRef.current = true;
       performSave();
     } else if (!autoSaveListing) {
@@ -396,6 +400,9 @@ export default function ListingPreviewScreen() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSaveListing, user]);
+
+  // Ref to prevent concurrent save operations
+  const isSavingRef = useRef(false);
 
 
   // Show loading state while loading from backend
@@ -562,13 +569,24 @@ export default function ListingPreviewScreen() {
     trackEvent('auto_save_toggle', { enabled: value, authenticated: !!user });
 
     // If checking and authenticated, save immediately
+    // Set the ref first to prevent useEffect from also triggering a save
     if (value && user) {
+      hasAutoSavedRef.current = true;
       performSave();
+    } else if (!value) {
+      // Reset when unchecked
+      hasAutoSavedRef.current = false;
     }
   };
 
   // Perform the actual save operation
   const performSave = async () => {
+    // Prevent concurrent save operations
+    if (isSavingRef.current) {
+      console.log('[Listing Save] Save already in progress, skipping duplicate call');
+      return;
+    }
+
     console.log('[Listing Save] performSave called', {
       hasUser: !!user,
       hasBackendListingId: !!backendListingId,
@@ -582,6 +600,9 @@ export default function ListingPreviewScreen() {
       console.warn('[Listing Save] No user, cannot save');
       return;
     }
+
+    // Mark as saving
+    isSavingRef.current = true;
 
     // Build current listing data
     const currentListing: ListingData = {
@@ -865,6 +886,9 @@ export default function ListingPreviewScreen() {
         `Error saving listing: ${error?.message || 'Unknown error'}. Please check the console for details.`,
         [{ text: 'OK' }]
       );
+    } finally {
+      // Always reset the saving flag, even if there was an error
+      isSavingRef.current = false;
     }
   };
 
