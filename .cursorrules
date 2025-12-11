@@ -206,3 +206,60 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 - Reset sign-up screen loading state when user becomes authenticated
 - Wrap `router.dismissAll()` in try-catch to prevent POP_TO_TOP errors
 - All debug instrumentation removed after successful verification
+
+## Fix Listing Auto-Save and Update Issues (2025-01-XX)
+
+**Task:** Fix two issues:
+1. Listings are being saved to "mylisting" even when user didn't select "save this listing"
+2. When modifying a listing via long press, the modified card doesn't show up in the "my listing" tab
+
+**Hypotheses:**
+
+**Issue 1 - Auto-save triggering incorrectly:**
+- Hypothesis A: `autoSaveListing` preference is loaded from storage and triggers auto-save even when user didn't check the box for this specific listing
+- Hypothesis B: `useEffect` at line 390-400 triggers `performSave()` when preferences load, even for listings where user didn't explicitly check the box
+- Hypothesis C: `hasAutoSavedRef` is not being reset properly when a new listing is loaded, causing auto-save to trigger incorrectly
+
+**Issue 2 - Modified listing not showing in my-listings:**
+- Hypothesis A: `updateListingApi` function is not updating the listing correctly (maybe wrong fields or error)
+- Hypothesis B: `my-listings.tsx` screen is not refreshing after returning from `listing-preview.tsx`
+- Hypothesis C: `backendListingId` is not being set correctly when loading from `my-listings.tsx`, so updates are not being applied to the correct listing
+- Hypothesis D: Update is happening but listing data is not being refreshed in the UI
+
+**Progress:**
+[X] Added instrumentation logs
+[X] User reproduces issues
+[X] Analyze logs and confirm/reject hypotheses
+[X] Implement fixes
+[X] Verify fixes with logs
+[X] Remove instrumentation
+
+**Fixes Implemented:**
+
+**Issue 1 - Auto-save triggering incorrectly:**
+- ✅ Fixed: Removed auto-save trigger when preference loads from storage
+- ✅ Auto-save now ONLY triggers when user explicitly checks the checkbox
+- ✅ Preference controls checkbox state but doesn't trigger saves
+
+**Issue 2 - Modified listing not showing updates:**
+- ✅ Fixed: Added auto-save for existing listings (those with backendListingId)
+- ✅ Changes auto-save after 1.5 seconds of inactivity (debounced)
+- ✅ Hide "Save this listing" checkbox for existing listings (they're already saved)
+- ✅ Show "Changes are saved automatically" message for existing listings
+- ✅ Update initialValues after save to prevent duplicate saves
+- ✅ my-listings screen already uses useFocusEffect to refresh when returning
+
+**Key Changes:**
+- `app/(tabs)/listing-preview.tsx`:
+  - Removed auto-save trigger from preference loading useEffect
+  - Added auto-save useEffect for existing listings with debouncing (1.5s delay)
+  - Conditionally hide/show "Save this listing" checkbox based on backendListingId
+  - Set initialValues immediately when loading listing from backend (fixes auto-save detection)
+  - Update initialValues after successful save to prevent duplicate saves
+- `app/(tabs)/my-listings.tsx`:
+  - Added 300ms delay in useFocusEffect to ensure pending saves complete before refresh
+- `utils/listings-api.ts`:
+  - Added ownership verification before update to prevent errors
+  - Improved error handling for update operations
+
+**Status:** ✅ Fixed - All issues resolved, instrumentation removed

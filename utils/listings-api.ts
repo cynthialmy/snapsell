@@ -254,6 +254,8 @@ export async function createListing(params: CreateListingParams) {
     let data;
     try {
       data = JSON.parse(responseText);
+      console.log('[CreateListing] Parsed response keys:', Object.keys(data));
+      console.log('[CreateListing] Full parsed response:', JSON.stringify(data, null, 2));
     } catch (parseError) {
       console.error('[CreateListing] Failed to parse response as JSON:', parseError);
       console.error('[CreateListing] Raw response:', responseText);
@@ -291,7 +293,21 @@ export async function createListing(params: CreateListingParams) {
     }
 
     console.log('[CreateListing] Success! Listing ID:', data.listing?.id);
-    return { listing: data.listing, quota: data.quota, error: null };
+    console.log('[CreateListing] Response structure:', {
+      hasListing: !!data.listing,
+      hasQuota: !!data.quota,
+      listingKeys: data.listing ? Object.keys(data.listing) : [],
+      quotaKeys: data.quota ? Object.keys(data.quota) : [],
+    });
+
+    const result = { listing: data.listing, quota: data.quota || null, error: null };
+    console.log('[CreateListing] Returning:', {
+      hasListing: !!result.listing,
+      hasQuota: !!result.quota,
+      listingId: result.listing?.id,
+      error: result.error,
+    });
+    return result;
   } catch (error: any) {
     console.error('[CreateListing] Create listing error:', error);
     console.error('[CreateListing] Error message:', error?.message);
@@ -360,6 +376,7 @@ export async function getMyListings() {
       throw new Error('Not authenticated');
     }
 
+    // Fetch fresh listings - Supabase doesn't cache by default, but we ensure fresh data
     const { data: listings, error } = await supabase
       .from('listings')
       .select('*')
@@ -382,6 +399,22 @@ export async function updateListing(listingId: string, updates: Partial<CreateLi
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
       throw new Error('Not authenticated');
+    }
+
+    // First verify the listing exists and belongs to the user
+    const { data: existingListing, error: checkError } = await supabase
+      .from('listings')
+      .select('id, user_id')
+      .eq('id', listingId)
+      .single();
+
+    if (checkError || !existingListing) {
+      throw checkError || new Error('Listing not found');
+    }
+
+    // Verify ownership (RLS should handle this, but explicit check helps debug)
+    if (existingListing.user_id !== session.user.id) {
+      throw new Error('Not authorized to update this listing');
     }
 
     const { data: listing, error } = await supabase

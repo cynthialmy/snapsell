@@ -4,17 +4,17 @@ import * as Location from 'expo-location';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -119,6 +119,11 @@ export default function ListingPreviewScreen() {
   const [modifications, setModifications] = useState<FieldModification[]>([]);
   const [listingId, setListingId] = useState<string | undefined>(payload?.listingId);
 
+  // Refs for auto-save tracking (declared early so they can be used in useEffects)
+  const hasAutoSavedRef = useRef(false);
+  const isSavingRef = useRef(false);
+  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+
   // Refs to track previous values for onBlur tracking
   const prevTitleRef = useRef<string>(listing?.title ?? '');
   const prevPriceRef = useRef<string>(listing?.price ?? '');
@@ -205,9 +210,31 @@ export default function ListingPreviewScreen() {
           const currencySymbol = currencyMap[backendListing.currency] || '$';
           setCurrency(currencySymbol);
 
-          // Reset modifications and initial values
+          // Load preferences to get default values for fields not stored in backend
+          const prefs = await loadPreferences();
+          const finalCurrency = currencySymbol;
+          const finalLocation = prefs?.location || '';
+          const finalCondition = listingData.condition || CONDITION_OPTIONS[2];
+          const finalPickupAvailable = prefs?.pickupAvailable ?? false;
+          const finalShippingAvailable = prefs?.shippingAvailable ?? false;
+          const finalPickupNotes = prefs?.pickupNotes || '';
+
+          // Set initial values immediately so auto-save can detect changes
+          const initial = {
+            title: listingData.title,
+            price: listingData.price,
+            currency: finalCurrency,
+            condition: finalCondition,
+            location: finalLocation,
+            description: listingData.description,
+            pickupAvailable: finalPickupAvailable,
+            shippingAvailable: finalShippingAvailable,
+            pickupNotes: finalPickupNotes,
+          };
+          setInitialValues(initial);
+
+          // Reset modifications
           setModifications([]);
-          setInitialValues(null);
         } catch (error) {
           console.error('Error loading listing from backend:', error);
           Alert.alert('Error', 'Failed to load listing. Please try again.', [
@@ -250,6 +277,8 @@ export default function ListingPreviewScreen() {
       setModifications([]);
       // Reset initial values so they get recalculated for the new listing
       setInitialValues(null);
+      // Reset auto-save ref when new listing is loaded (don't auto-save new listings unless user checks box)
+      hasAutoSavedRef.current = false;
     }
   }, [payload]);
 
@@ -382,27 +411,75 @@ export default function ListingPreviewScreen() {
     }
   }, [user, showLoginGate]);
 
+  // Helper function to normalize values for comparison (defined early so it can be used in useEffects)
+  const normalizeValue = (value: any): any => {
+    if (typeof value === 'string') {
+      return value.trim();
+    }
+    return value;
+  };
+
   // Auto-save listing when checkbox is checked and user is authenticated
   // Use a ref to track if we've already saved for this checkbox state
   // Note: The actual save is triggered from handleAutoSaveToggle to avoid timing issues
-  // This useEffect handles the case when auto-save preference is loaded from storage
-  const hasAutoSavedRef = useRef(false);
+  // IMPORTANT: We do NOT auto-save when preference is loaded from storage - only when user explicitly checks the box
+  // This prevents listings from being saved automatically when user didn't intend to save them
   useEffect(() => {
-    // Only trigger if auto-save is enabled, user is authenticated, and we haven't saved yet
-    // This handles the case when preferences load with auto-save already enabled
-    if (autoSaveListing && user && !hasAutoSavedRef.current) {
-      // Auto-save was enabled (likely from preferences), save the listing
-      hasAutoSavedRef.current = true;
-      performSave();
-    } else if (!autoSaveListing) {
+    // Only reset when unchecked - do NOT trigger auto-save here
+    // Auto-save is ONLY triggered from handleAutoSaveToggle when user explicitly checks the box
+    if (!autoSaveListing) {
       // Reset when unchecked
       hasAutoSavedRef.current = false;
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoSaveListing, user]);
 
-  // Ref to prevent concurrent save operations
-  const isSavingRef = useRef(false);
+  // Auto-save changes for existing listings (those with backendListingId)
+  // Debounce saves to avoid too many API calls while user is typing
+  useEffect(() => {
+    // Only auto-save if:
+    // 1. We have a backendListingId (editing existing listing)
+    // 2. User is authenticated
+    // 3. Initial values are set (so we can detect changes)
+    // 4. We're not currently saving
+    if (!backendListingId || !user || !initialValues || isSavingRef.current) {
+      return;
+    }
+
+    // Check if any field has changed from initial values
+    const titleChanged = normalizeValue(title) !== normalizeValue(initialValues.title);
+    const priceChanged = normalizeValue(price) !== normalizeValue(initialValues.price);
+    const descriptionChanged = normalizeValue(description) !== normalizeValue(initialValues.description);
+    const conditionChanged = normalizeValue(condition) !== normalizeValue(initialValues.condition);
+    const currencyChanged = normalizeValue(currency) !== normalizeValue(initialValues.currency);
+    const pickupChanged = pickupAvailable !== initialValues.pickupAvailable;
+    const shippingChanged = shippingAvailable !== initialValues.shippingAvailable;
+    const pickupNotesChanged = normalizeValue(pickupNotes) !== normalizeValue(initialValues.pickupNotes);
+
+    const hasChanges = titleChanged || priceChanged || descriptionChanged || conditionChanged ||
+                       currencyChanged || pickupChanged || shippingChanged || pickupNotesChanged;
+
+    if (!hasChanges) {
+      return;
+    }
+
+    // Clear existing timer
+    if (autoSaveTimerRef.current) {
+      clearTimeout(autoSaveTimerRef.current);
+    }
+
+    // Debounce: wait 1.5 seconds after user stops typing before saving
+    autoSaveTimerRef.current = setTimeout(() => {
+      performSave();
+    }, 1500);
+
+    // Cleanup timer on unmount or when dependencies change
+    return () => {
+      if (autoSaveTimerRef.current) {
+        clearTimeout(autoSaveTimerRef.current);
+      }
+    };
+  }, [title, price, description, condition, currency, pickupAvailable, shippingAvailable, pickupNotes, backendListingId, user, initialValues]);
 
 
   // Show loading state while loading from backend
@@ -420,14 +497,6 @@ export default function ListingPreviewScreen() {
   if (!payload && !params.listingId) {
     return null;
   }
-
-  // Helper function to normalize values for comparison
-  const normalizeValue = (value: any): any => {
-    if (typeof value === 'string') {
-      return value.trim();
-    }
-    return value;
-  };
 
   // Helper function to track field modifications
   const trackFieldModification = (field: string, oldValue: any, newValue: any) => {
@@ -661,6 +730,21 @@ export default function ListingPreviewScreen() {
         } else {
           console.log('[Listing Save] Successfully updated backend listing');
           trackEvent('listing_saved', { listing_id: backendListingId, user_id: user.id });
+
+          // Update initial values to reflect the saved state, so we don't trigger another save immediately
+          if (initialValues) {
+            setInitialValues({
+              ...initialValues,
+              title,
+              price,
+              description,
+              condition,
+              currency,
+              pickupAvailable,
+              shippingAvailable,
+              pickupNotes,
+            });
+          }
         }
 
         // Also update local storage if listingId exists
@@ -1220,21 +1304,33 @@ export default function ListingPreviewScreen() {
             <Text style={styles.success}>Copied! Paste it into your marketplace.</Text>
           ) : null}
 
-          <View style={styles.autoSaveSection}>
-            <View style={styles.toggleRow}>
-              <Text style={styles.toggleLabel}>Save this listing for future</Text>
-              <Switch
-                value={autoSaveListing}
-                onValueChange={handleAutoSaveToggle}
-                disabled={false}
-              />
+          {/* Only show "Save this listing" checkbox for new listings (no backendListingId) */}
+          {!backendListingId && (
+            <View style={styles.autoSaveSection}>
+              <View style={styles.toggleRow}>
+                <Text style={styles.toggleLabel}>Save this listing for future</Text>
+                <Switch
+                  value={autoSaveListing}
+                  onValueChange={handleAutoSaveToggle}
+                  disabled={false}
+                />
+              </View>
+              {!user && (
+                <Text style={styles.autoSaveHint}>
+                  Sign in to save your listings
+                </Text>
+              )}
             </View>
-            {!user && (
+          )}
+
+          {/* Show auto-save indicator for existing listings */}
+          {backendListingId && user && (
+            <View style={styles.autoSaveSection}>
               <Text style={styles.autoSaveHint}>
-                Sign in to save your listings
+                Changes are saved automatically
               </Text>
-            )}
-          </View>
+            </View>
+          )}
 
           <Pressable
             onPress={handleReset}

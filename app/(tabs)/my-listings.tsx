@@ -2,14 +2,14 @@ import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    Alert,
-    Image,
-    Pressable,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Image,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -64,8 +64,14 @@ export default function MyListingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      loadListings();
-    }, [loadListings])
+      // Add a small delay to ensure any pending saves have completed
+      // This is especially important for auto-save which has a debounce
+      const timer = setTimeout(() => {
+        loadListings();
+      }, 300);
+
+      return () => clearTimeout(timer);
+    }, [loadListings, user])
   );
 
   const handleRefresh = useCallback(() => {
