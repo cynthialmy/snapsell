@@ -1,3 +1,4 @@
+import * as Linking from 'expo-linking';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
@@ -12,7 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { checkQuota } from '@/utils/listings-api';
-import { openKoFiCheckout } from '@/utils/payments';
+import { initiateCreditPurchase, initiateProSubscription } from '@/utils/payments';
 
 interface Quota {
   used: number;
@@ -22,7 +23,7 @@ interface Quota {
 
 export default function UpgradeScreen() {
   const router = useRouter();
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [quota, setQuota] = useState<Quota | null>(null);
   const [loading, setLoading] = useState(true);
   const [processing, setProcessing] = useState(false);
@@ -54,7 +55,7 @@ export default function UpgradeScreen() {
     }, [loadQuota])
   );
 
-  const handlePurchase = async (productId: string, amount?: number, isSubscription: boolean = false) => {
+  const handlePurchaseCredits = async (credits: 10 | 25 | 60) => {
     if (!user) {
       Alert.alert(
         'Account required',
@@ -72,15 +73,76 @@ export default function UpgradeScreen() {
 
     setProcessing(true);
     try {
-      await openKoFiCheckout(productId, amount, isSubscription);
-      // Payment will be handled via deep link callback
-      Alert.alert(
-        'Payment initiated',
-        'Complete your payment on Ko-fi. Your account will be updated automatically.',
-        [{ text: 'OK' }]
-      );
+      const checkoutUrl = await initiateCreditPurchase(credits);
+
+      // Open Stripe checkout in browser
+      const canOpen = await Linking.canOpenURL(checkoutUrl);
+      if (canOpen) {
+        await Linking.openURL(checkoutUrl);
+        Alert.alert(
+          'Payment Started',
+          'Complete your payment in the browser. Your credits will be added automatically.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Refresh user data after a delay to allow webhook to process
+                setTimeout(() => refreshUser(), 5000);
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Cannot open payment URL');
+      }
     } catch (error: any) {
-      Alert.alert('Error', error.message || 'Failed to open payment page. Please try again.');
+      Alert.alert('Error', error.message || 'Failed to start payment. Please try again.');
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleSubscribe = async (plan: 'monthly' | 'yearly') => {
+    if (!user) {
+      Alert.alert(
+        'Account required',
+        'You need to create an account to purchase credits or upgrade. Sign in to continue.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          {
+            text: 'Sign In',
+            onPress: () => router.push('/(auth)/sign-in'),
+          },
+        ]
+      );
+      return;
+    }
+
+    setProcessing(true);
+    try {
+      const checkoutUrl = await initiateProSubscription(plan);
+
+      const canOpen = await Linking.canOpenURL(checkoutUrl);
+      if (canOpen) {
+        await Linking.openURL(checkoutUrl);
+        Alert.alert(
+          'Subscription Started',
+          'Complete your subscription in the browser. Your plan will be upgraded automatically.',
+          [
+            {
+              text: 'OK',
+              onPress: () => {
+                // Refresh user data after a delay to allow webhook to process
+                setTimeout(() => refreshUser(), 5000);
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert('Error', 'Cannot open payment URL');
+      }
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to start subscription. Please try again.');
     } finally {
       setProcessing(false);
     }
@@ -125,7 +187,7 @@ export default function UpgradeScreen() {
               <Text style={styles.productDescription}>Create 10 additional listings</Text>
             </View>
             <Pressable
-              onPress={() => handlePurchase('credits-10', 10)}
+              onPress={() => handlePurchaseCredits(10)}
               disabled={processing}
               style={({ pressed }) => [
                 styles.purchaseButton,
@@ -143,7 +205,7 @@ export default function UpgradeScreen() {
               <Text style={styles.productDescription}>Create 25 additional listings</Text>
             </View>
             <Pressable
-              onPress={() => handlePurchase('credits-25', 20)}
+              onPress={() => handlePurchaseCredits(25)}
               disabled={processing}
               style={({ pressed }) => [
                 styles.purchaseButton,
@@ -157,11 +219,11 @@ export default function UpgradeScreen() {
 
           <View style={styles.productCard}>
             <View style={styles.productInfo}>
-              <Text style={styles.productName}>50 Credits</Text>
-              <Text style={styles.productDescription}>Create 50 additional listings</Text>
+              <Text style={styles.productName}>60 Credits</Text>
+              <Text style={styles.productDescription}>Create 60 additional listings</Text>
             </View>
             <Pressable
-              onPress={() => handlePurchase('credits-50', 35)}
+              onPress={() => handlePurchaseCredits(60)}
               disabled={processing}
               style={({ pressed }) => [
                 styles.purchaseButton,
@@ -177,7 +239,7 @@ export default function UpgradeScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Subscription Plans</Text>
           <Text style={styles.sectionDescription}>
-            Get unlimited listings with a monthly subscription
+            Get unlimited listings with a subscription
           </Text>
 
           <View style={styles.productCard}>
@@ -186,7 +248,25 @@ export default function UpgradeScreen() {
               <Text style={styles.productDescription}>Unlimited listings per month</Text>
             </View>
             <Pressable
-              onPress={() => handlePurchase('subscription-pro', undefined, true)}
+              onPress={() => handleSubscribe('monthly')}
+              disabled={processing}
+              style={({ pressed }) => [
+                styles.purchaseButton,
+                (processing || pressed) && styles.purchaseButtonDisabled,
+              ]}>
+              <Text style={styles.purchaseButtonText}>
+                {processing ? 'Processing...' : 'Subscribe'}
+              </Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.productCard}>
+            <View style={styles.productInfo}>
+              <Text style={styles.productName}>Pro Yearly</Text>
+              <Text style={styles.productDescription}>Unlimited listings per year</Text>
+            </View>
+            <Pressable
+              onPress={() => handleSubscribe('yearly')}
               disabled={processing}
               style={({ pressed }) => [
                 styles.purchaseButton,
@@ -201,7 +281,7 @@ export default function UpgradeScreen() {
 
         <View style={styles.noteSection}>
           <Text style={styles.noteText}>
-            Payments are processed securely through Ko-fi. Your account will be updated automatically after payment confirmation.
+            Payments are processed securely through Stripe Checkout. Your account will be updated automatically after payment confirmation.
           </Text>
         </View>
       </ScrollView>

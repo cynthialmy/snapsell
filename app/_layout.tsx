@@ -4,7 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -12,7 +12,7 @@ import { AnimatedSplash } from '@/components/animated-splash';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { initializePostHog } from '@/utils/analytics';
-import { parsePaymentCallback, verifyPayment } from '@/utils/payments';
+import { parsePaymentCallback, verifyPaymentStatus } from '@/utils/payments';
 
 // Prevent the native splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
@@ -188,15 +188,28 @@ function RootLayoutNav() {
       // Handle auth callback (for email confirmation and magic links)
       await handleAuthCallback(event.url);
 
-      // Handle payment callback
-      if (path === 'payment/callback') {
+      // Handle payment callback (Stripe redirects to success URL)
+      if (path === 'payment/callback' || path === 'payment/success') {
         const callback = parsePaymentCallback(event.url);
-        if (callback.status === 'success' && callback.referenceId) {
-          const { verified } = await verifyPayment(callback.referenceId);
-          if (verified) {
+        if (callback.status === 'success' && callback.sessionId) {
+          try {
+            const result = await verifyPaymentStatus(callback.sessionId);
+            // Payment verified successfully
+            Alert.alert(
+              'Payment Successful',
+              `You now have ${result.user.credits} credits!`
+            );
+            // Refresh user data
+            await refreshUser();
             router.push('/(tabs)/upgrade');
-            // Show success message
+          } catch (error: any) {
+            console.error('Payment verification error:', error);
+            Alert.alert('Payment Verification', 'Payment received but verification failed. Your account will be updated shortly.');
+            // Still refresh user data in case webhook already processed it
+            await refreshUser();
           }
+        } else if (callback.status === 'failed' || callback.status === 'cancelled') {
+          Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
         }
       }
 
@@ -213,6 +226,31 @@ function RootLayoutNav() {
 
         // Handle auth callback on app launch
         await handleAuthCallback(url);
+
+        // Handle payment callback on app launch
+        if (path === 'payment/callback' || path === 'payment/success') {
+          const callback = parsePaymentCallback(url);
+          if (callback.status === 'success' && callback.sessionId) {
+            try {
+              const result = await verifyPaymentStatus(callback.sessionId);
+              // Payment verified successfully
+              Alert.alert(
+                'Payment Successful',
+                `You now have ${result.user.credits} credits!`
+              );
+              // Refresh user data
+              await refreshUser();
+              router.push('/(tabs)/upgrade');
+            } catch (error: any) {
+              console.error('Payment verification error:', error);
+              Alert.alert('Payment Verification', 'Payment received but verification failed. Your account will be updated shortly.');
+              // Still refresh user data in case webhook already processed it
+              await refreshUser();
+            }
+          } else if (callback.status === 'failed' || callback.status === 'cancelled') {
+            Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
+          }
+        }
 
         // Handle share links
         if (path === 'share' && queryParams?.slug) {
