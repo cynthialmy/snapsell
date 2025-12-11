@@ -176,3 +176,33 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 - Original implementation: `backend/main.py`
 - LLM API helper: `tools/llm_api.py`
 - Frontend integration: `utils/api.ts` (updated), `utils/listings-api.ts` (new)
+
+## Fix Email Confirmation Callback Session Creation Issue (2025-01-XX)
+
+**Problem:** Email confirmation callback URLs are received (token present, type: signup) but sessions are not being created. Users remain logged out after clicking confirmation links. Also, auth screens remain visible and need manual dismissal.
+
+**Root Cause:**
+- When Supabase sends `access_token` and `refresh_token` in URL hash, `detectSessionInUrl` doesn't automatically extract the session
+- Need to explicitly call `supabase.auth.setSession()` with tokens from URL hash
+- Sign-up screen loading state persists after navigation to email-confirmation
+- `router.dismissAll()` causes POP_TO_TOP error when there's nothing to dismiss
+
+**Solution Implemented:**
+- Updated `handleAuthCallback` in `_layout.tsx` to detect `access_token` in URL hash and call `setSession()` explicitly
+- Added `useEffect` in sign-up screen to reset loading state when user becomes authenticated
+- Wrapped all `router.dismissAll()` calls in try-catch to prevent POP_TO_TOP errors
+- Updated email-confirmation screen to dismiss modals before navigation
+
+**Key Changes:**
+- `app/_layout.tsx`: Added explicit `setSession()` call when URL contains access_token
+- `app/(auth)/sign-up.tsx`: Added useEffect to reset loading state on authentication
+- `app/(auth)/email-confirmation.tsx`: Added dismissAll() with error handling
+- All dismissAll() calls wrapped in try-catch to handle cases where there's nothing to dismiss
+
+**Status:** ✅ Fixed - Session creation works, auth screens auto-dismiss
+
+**Final Solution:**
+- When callback URL contains `access_token` and `refresh_token` in hash fragment, explicitly call `supabase.auth.setSession()` to create the session
+- Reset sign-up screen loading state when user becomes authenticated
+- Wrap `router.dismissAll()` in try-catch to prevent POP_TO_TOP errors
+- All debug instrumentation removed after successful verification

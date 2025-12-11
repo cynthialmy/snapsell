@@ -48,6 +48,12 @@ function RootLayoutNav() {
       // Allow access to all tabs - screens will show appropriate messages for non-logged users
     } else if (user && inAuthGroup) {
       // Redirect to tabs if authenticated and in auth group
+      // Try to dismiss modals, but don't fail if there's nothing to dismiss
+      try {
+        router.dismissAll();
+      } catch (e) {
+        // Ignore dismiss errors - replace will handle navigation
+      }
       router.replace('/(tabs)');
     } else if (user && !inTabsGroup && !inAuthGroup && !onShareScreen) {
       // Redirect authenticated users from root index to tabs
@@ -71,9 +77,12 @@ function RootLayoutNav() {
           let type: string | undefined;
 
           const hashIndex = url.indexOf('#');
+          let hashFragment: string | null = null;
+          let hashParams: URLSearchParams | null = null;
+
           if (hashIndex !== -1) {
-            const hashFragment = url.substring(hashIndex + 1);
-            const hashParams = new URLSearchParams(hashFragment);
+            hashFragment = url.substring(hashIndex + 1);
+            hashParams = new URLSearchParams(hashFragment);
 
             // Supabase hash fragment contains: access_token, token_type, expires_in, refresh_token, type
             const accessToken = hashParams.get('access_token');
@@ -92,10 +101,46 @@ function RootLayoutNav() {
 
           console.log('Deep link auth callback - token:', token ? 'present' : 'missing', 'type:', type);
 
-          // With detectSessionInUrl enabled, Supabase should automatically extract session from URL
-          // Wait a moment for Supabase to process the URL hash fragment
-          await new Promise(resolve => setTimeout(resolve, 500));
+          // Check if URL contains access_token (session already created server-side)
+          const accessToken = hashParams?.get('access_token');
+          const refreshToken = hashParams?.get('refresh_token');
+          const hasAccessToken = !!accessToken;
 
+          if (hasAccessToken && refreshToken) {
+            // URL contains access_token - session is already created server-side
+            // We need to set the session explicitly using setSession
+            console.log('URL contains access_token, setting session explicitly...');
+
+            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (sessionError) {
+              console.error('Error setting session:', sessionError);
+              return;
+            }
+
+            if (sessionData.session) {
+              console.log('Session set successfully, user authenticated');
+              // Force refresh the user in AuthContext
+              await refreshUser();
+
+              // Wait a bit longer to ensure AuthContext has updated, then dismiss all modals and navigate
+              setTimeout(() => {
+                // Try to dismiss modals, but don't fail if there's nothing to dismiss
+                try {
+                  router.dismissAll();
+                } catch (e) {
+                  // Ignore dismiss errors - replace will handle navigation
+                }
+                router.replace('/(tabs)');
+              }, 800);
+              return;
+            }
+          }
+
+          // Fallback: Check session (in case detectSessionInUrl worked)
           const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
 
           if (sessionError) {
@@ -108,8 +153,14 @@ function RootLayoutNav() {
             // Force refresh the user in AuthContext
             await refreshUser();
 
-            // Wait a bit longer to ensure AuthContext has updated
+            // Wait a bit longer to ensure AuthContext has updated, then dismiss all modals and navigate
             setTimeout(() => {
+              // Try to dismiss modals, but don't fail if there's nothing to dismiss
+              try {
+                router.dismissAll();
+              } catch (e) {
+                // Ignore dismiss errors - replace will handle navigation
+              }
               router.replace('/(tabs)');
             }, 800);
           } else {

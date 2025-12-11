@@ -22,6 +22,12 @@ export default function EmailConfirmationScreen() {
   useEffect(() => {
     // If user is authenticated (after clicking confirmation link), redirect to home
     if (user) {
+      // Try to dismiss modals, but don't fail if there's nothing to dismiss
+      try {
+        router.dismissAll();
+      } catch (e) {
+        // Ignore dismiss errors - replace will handle navigation
+      }
       router.replace('/(tabs)');
     }
   }, [user, router]);

@@ -1,5 +1,5 @@
 import { useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
     Alert,
     KeyboardAvoidingView,
@@ -13,15 +13,24 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { useAuth } from '@/contexts/AuthContext';
 import { signUp } from '@/utils/auth';
 
 export default function SignUpScreen() {
   const router = useRouter();
+  const { user, loading: authLoading } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Reset loading state when user becomes authenticated (e.g., after email confirmation)
+  useEffect(() => {
+    if (user && loading) {
+      setLoading(false);
+    }
+  }, [user, loading]);
 
   const handleSignUp = async () => {
     if (!email || !password) {
@@ -49,6 +58,8 @@ export default function SignUpScreen() {
       // Check if email confirmation is required
       // If session is null but user exists, email confirmation is needed
       if (!data.session) {
+        // Reset loading state before navigating
+        setLoading(false);
         // Navigate to email confirmation screen
         router.push({
           pathname: '/(auth)/email-confirmation',
@@ -56,12 +67,16 @@ export default function SignUpScreen() {
         });
       } else {
         // Email confirmation not required, user is already signed in
+        setLoading(false);
         Alert.alert(
           'Account created',
           'Your account has been created successfully!',
           [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
         );
       }
+    } else {
+      // No user data returned, reset loading
+      setLoading(false);
     }
   };
 
