@@ -1,20 +1,20 @@
 import { useRouter } from 'expo-router';
-import { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { signOut, getUserProfile, updateUserProfile } from '@/utils/auth';
+import { deleteAccount, getUserProfile, signOut, updateUserProfile } from '@/utils/auth';
 
 export default function ProfileScreen() {
   const router = useRouter();
@@ -66,6 +66,41 @@ export default function ProfileScreen() {
 
     Alert.alert('Success', 'Profile updated successfully');
     setLoading(false);
+  };
+
+  const handleDeleteAccount = async () => {
+    Alert.alert(
+      'Delete Account',
+      'Are you sure? This action cannot be undone. All your listings and data will be permanently deleted.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await deleteAccount();
+              if (error) {
+                Alert.alert(
+                  'Error',
+                  error.message || 'Failed to delete account. Please try again.',
+                  [{ text: 'OK' }]
+                );
+                return;
+              }
+              // Account deleted successfully, user is already signed out
+              router.replace('/(auth)/sign-in');
+            } catch (error: any) {
+              Alert.alert(
+                'Error',
+                'Failed to delete account. Please try again.',
+                [{ text: 'OK' }]
+              );
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleSignOut = async () => {
@@ -141,12 +176,10 @@ export default function ProfileScreen() {
             </Pressable>
           </View>
 
-          <View style={styles.section}>
-            <Pressable
-              onPress={() => router.push('/(tabs)/settings')}
-              style={styles.sectionButton}>
-              <Text style={styles.sectionButtonText}>Settings</Text>
-              <Text style={styles.sectionButtonArrow}>→</Text>
+          <View style={styles.dangerZoneSection}>
+            <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+            <Pressable onPress={handleDeleteAccount} style={styles.deleteAccountButton}>
+              <Text style={styles.deleteAccountButtonText}>Delete Account</Text>
             </Pressable>
           </View>
 
@@ -236,25 +269,32 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  section: {
-    marginTop: 24,
-    borderTopWidth: 1,
-    borderTopColor: '#E2E8F0',
-    paddingTop: 16,
+  dangerZoneSection: {
+    marginTop: 32,
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#FEE2E2',
   },
-  sectionButton: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  dangerZoneTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#DC2626',
+    marginBottom: 16,
+  },
+  deleteAccountButton: {
     paddingVertical: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#DC2626',
+    borderRadius: 8,
+    backgroundColor: '#FEF2F2',
   },
-  sectionButtonText: {
+  deleteAccountButtonText: {
     fontSize: 16,
-    color: '#0F172A',
-  },
-  sectionButtonArrow: {
-    fontSize: 16,
-    color: '#64748B',
+    color: '#DC2626',
+    fontWeight: '600',
   },
   signOutSection: {
     marginTop: 32,

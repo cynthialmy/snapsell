@@ -15,7 +15,6 @@ export default function AuthLayout() {
       />
       <Stack.Screen name="sign-up" options={{ headerShown: false }} />
       <Stack.Screen name="magic-link" options={{ headerShown: false }} />
-      <Stack.Screen name="profile" options={{ headerShown: false }} />
     </Stack>
   );
 }

@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { deleteAccount, signOut } from '@/utils/auth';
+import { signOut } from '@/utils/auth';
 import { checkQuota } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
 
@@ -123,40 +123,6 @@ export default function SettingsScreen() {
     router.push('/(tabs)/upgrade');
   };
 
-  const handleDeleteAccount = async () => {
-    Alert.alert(
-      'Delete Account',
-      'Are you sure? This action cannot be undone. All your listings and data will be permanently deleted.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              const { error } = await deleteAccount();
-              if (error) {
-                Alert.alert(
-                  'Error',
-                  error.message || 'Failed to delete account. Please try again.',
-                  [{ text: 'OK' }]
-                );
-                return;
-              }
-              // Account deleted successfully, user is already signed out
-              router.replace('/(auth)/sign-in');
-            } catch (error: any) {
-              Alert.alert(
-                'Error',
-                'Failed to delete account. Please try again.',
-                [{ text: 'OK' }]
-              );
-            }
-          },
-        },
-      ]
-    );
-  };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -174,7 +140,7 @@ export default function SettingsScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account</Text>
             <Pressable
-              onPress={() => router.push('/(auth)/profile')}
+              onPress={() => router.push('/profile')}
               style={styles.sectionButton}>
               <Text style={styles.sectionButtonText}>Profile</Text>
               <Text style={styles.sectionButtonArrow}>→</Text>
@@ -299,20 +265,11 @@ export default function SettingsScreen() {
         </View>
 
         {user && (
-          <>
-            <View style={styles.dangerZoneSection}>
-              <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
-              <Pressable onPress={handleDeleteAccount} style={styles.deleteAccountButton}>
-                <Text style={styles.deleteAccountButtonText}>Delete Account</Text>
-              </Pressable>
-            </View>
-
-            <View style={styles.signOutSection}>
-              <Pressable onPress={handleSignOut} style={styles.signOutButton}>
-                <Text style={styles.signOutButtonText}>Sign out</Text>
-              </Pressable>
-            </View>
-          </>
+          <View style={styles.signOutSection}>
+            <Pressable onPress={handleSignOut} style={styles.signOutButton}>
+              <Text style={styles.signOutButtonText}>Sign out</Text>
+            </Pressable>
+          </View>
         )}
       </ScrollView>
     </SafeAreaView>
@@ -492,33 +449,6 @@ const styles = StyleSheet.create({
   currencyButtonArrow: {
     fontSize: 12,
     color: '#64748B',
-  },
-  dangerZoneSection: {
-    marginTop: 32,
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: '#FEE2E2',
-  },
-  dangerZoneTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#DC2626',
-    marginBottom: 16,
-  },
-  deleteAccountButton: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#DC2626',
-    borderRadius: 8,
-    backgroundColor: '#FEF2F2',
-  },
-  deleteAccountButtonText: {
-    fontSize: 16,
-    color: '#DC2626',
-    fontWeight: '600',
   },
   signOutSection: {
     marginTop: 32,

@@ -4,6 +4,7 @@ import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
 import { useEffect, useState } from 'react';
+import { Platform } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -30,12 +31,18 @@ function RootLayoutNav() {
     const onListingPreview = inTabsGroup && segments[1] === 'listing-preview';
     const onShareScreen = segments[0] === 'share';
     const onAuthCallback = segments[0] === 'auth' && segments[1] === 'callback';
+    const onProfileScreen = segments[0] === 'profile';
     // Check if we're on tabs index (first tab, which is the home screen)
     // When in tabs group with only one segment, we're on the index tab
     const onTabsIndex = inTabsGroup && segments.length === 1;
 
     // Don't interfere with auth callback route - it handles its own redirect
     if (onAuthCallback) {
+      return;
+    }
+
+    // Don't interfere with profile modal - allow it to be shown
+    if (onProfileScreen) {
       return;
     }
 
@@ -229,6 +236,15 @@ function RootLayoutNav() {
         options={{
           title: 'Shared Listing',
           headerShown: true,
+        }}
+      />
+      <Stack.Screen
+        name="profile"
+        options={{
+          title: 'Profile',
+          headerShown: true,
+          presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+          animation: Platform.OS === 'ios' ? 'default' : 'slide_from_bottom',
         }}
       />
     </Stack>
