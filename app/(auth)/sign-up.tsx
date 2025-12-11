@@ -1,15 +1,15 @@
 import { useRouter } from 'expo-router';
 import { useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -46,11 +46,22 @@ export default function SignUpScreen() {
     }
 
     if (data?.user) {
-      Alert.alert(
-        'Account created',
-        'Your account has been created successfully!',
-        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
-      );
+      // Check if email confirmation is required
+      // If session is null but user exists, email confirmation is needed
+      if (!data.session) {
+        // Navigate to email confirmation screen
+        router.push({
+          pathname: '/(auth)/email-confirmation',
+          params: { email },
+        });
+      } else {
+        // Email confirmation not required, user is already signed in
+        Alert.alert(
+          'Account created',
+          'Your account has been created successfully!',
+          [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+        );
+      }
     }
   };
 

@@ -33,7 +33,7 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
     storage: ExpoSecureStoreAdapter,
     autoRefreshToken: true,
     persistSession: true,
-    detectSessionInUrl: false,
+    detectSessionInUrl: true, // Enable to automatically extract session from URL hash fragments
   },
 });
 
@@ -46,10 +46,15 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_PUBLISHABLE_KEY, {
  */
 export async function signUp(email: string, password: string, displayName?: string) {
   try {
+    // Get deep link scheme from environment or use default (matches app.json scheme)
+    const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
+    const emailRedirectTo = `${deepLinkScheme}://auth/callback`;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
+        emailRedirectTo,
         data: {
           display_name: displayName || email.split('@')[0],
         },
@@ -89,10 +94,14 @@ export async function signIn(email: string, password: string) {
  */
 export async function signInWithMagicLink(email: string) {
   try {
+    // Get deep link scheme from environment or use default (matches app.json scheme)
+    const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
+    const emailRedirectTo = `${deepLinkScheme}://auth/callback`;
+
     const { data, error } = await supabase.auth.signInWithOtp({
       email,
       options: {
-        emailRedirectTo: 'snapsell://auth/callback',
+        emailRedirectTo,
       },
     });
 
@@ -210,6 +219,35 @@ export async function updateUserProfile(updates: {
   } catch (error: any) {
     console.error('Update profile error:', error);
     return { profile: null, error };
+  }
+}
+
+/**
+ * Delete user account
+ * Calls Supabase Edge Function to delete account and all associated data
+ */
+export async function deleteAccount() {
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      return { error: { message: 'Not authenticated' } };
+    }
+
+    // Call Supabase Edge Function to delete account
+    const { data, error } = await supabase.functions.invoke('delete-account', {
+      method: 'POST',
+    });
+
+    if (error) throw error;
+
+    // If deletion was successful, sign out the user
+    await supabase.auth.signOut();
+    await SecureStore.deleteItemAsync('supabase_session');
+
+    return { data, error: null };
+  } catch (error: any) {
+    console.error('Delete account error:', error);
+    return { data: null, error };
   }
 }
 

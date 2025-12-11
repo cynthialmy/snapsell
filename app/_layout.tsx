@@ -17,7 +17,7 @@ import { parsePaymentCallback, verifyPayment } from '@/utils/payments';
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
-  const { user, loading } = useAuth();
+  const { user, loading, refreshUser } = useAuth();
   const segments = useSegments();
   const router = useRouter();
   const colorScheme = useColorScheme();
@@ -29,9 +29,15 @@ function RootLayoutNav() {
     const inTabsGroup = segments[0] === '(tabs)';
     const onListingPreview = inTabsGroup && segments[1] === 'listing-preview';
     const onShareScreen = segments[0] === 'share';
+    const onAuthCallback = segments[0] === 'auth' && segments[1] === 'callback';
     // Check if we're on tabs index (first tab, which is the home screen)
     // When in tabs group with only one segment, we're on the index tab
     const onTabsIndex = inTabsGroup && segments.length === 1;
+
+    // Don't interfere with auth callback route - it handles its own redirect
+    if (onAuthCallback) {
+      return;
+    }
 
     // Allow unauthenticated access to all tabs - individual screens handle non-logged state
     if (!user && !inAuthGroup) {
@@ -50,15 +56,79 @@ function RootLayoutNav() {
   }, [user, loading, segments]);
 
   useEffect(() => {
-    // Handle deep links
+    // Helper function to handle auth callback
+    const handleAuthCallback = async (url: string) => {
+      const { path, queryParams } = Linking.parse(url);
+
+      if (path === 'auth/callback' || url.includes('auth/callback')) {
+        try {
+          // Import supabase to process the auth callback
+          const { supabase } = await import('@/utils/auth');
+
+          // Supabase sends tokens in hash fragment (#access_token=...)
+          // Extract hash fragment first, as that's where Supabase puts the auth data
+          let token: string | undefined;
+          let type: string | undefined;
+
+          const hashIndex = url.indexOf('#');
+          if (hashIndex !== -1) {
+            const hashFragment = url.substring(hashIndex + 1);
+            const hashParams = new URLSearchParams(hashFragment);
+
+            // Supabase hash fragment contains: access_token, token_type, expires_in, refresh_token, type
+            const accessToken = hashParams.get('access_token');
+            type = hashParams.get('type') || undefined;
+
+            // For verifyOtp, we need the token from the email link
+            // The hash might have 'token' or we might need to use access_token
+            token = hashParams.get('token') || accessToken || undefined;
+          }
+
+          // Fallback: try query params
+          if (!token || !type) {
+            token = token || (queryParams?.token as string | undefined);
+            type = type || (queryParams?.type as string | undefined);
+          }
+
+          console.log('Deep link auth callback - token:', token ? 'present' : 'missing', 'type:', type);
+
+          // With detectSessionInUrl enabled, Supabase should automatically extract session from URL
+          // Wait a moment for Supabase to process the URL hash fragment
+          await new Promise(resolve => setTimeout(resolve, 500));
+
+          const { data: sessionData, error: sessionError } = await supabase.auth.getSession();
+
+          if (sessionError) {
+            console.error('Error getting session:', sessionError);
+            return;
+          }
+
+          if (sessionData.session) {
+            console.log('Session found, user authenticated');
+            // Force refresh the user in AuthContext
+            await refreshUser();
+
+            // Wait a bit longer to ensure AuthContext has updated
+            setTimeout(() => {
+              router.replace('/(tabs)');
+            }, 800);
+          } else {
+            console.warn('Session was not created after processing auth callback URL');
+            // If we have token/type but no session, the URL format might be wrong
+            // The callback route will handle this case
+          }
+        } catch (error) {
+          console.error('Error handling auth callback:', error);
+        }
+      }
+    };
+
+    // Handle deep links when app is already running
     const subscription = Linking.addEventListener('url', async (event) => {
       const { path, queryParams } = Linking.parse(event.url);
 
-      // Handle auth callback
-      if (path === 'auth/callback') {
-        // Auth state will be updated by AuthContext
-        router.replace('/(tabs)');
-      }
+      // Handle auth callback (for email confirmation and magic links)
+      await handleAuthCallback(event.url);
 
       // Handle payment callback
       if (path === 'payment/callback') {
@@ -78,10 +148,15 @@ function RootLayoutNav() {
       }
     });
 
-    // Check if app was opened with a deep link
-    Linking.getInitialURL().then((url) => {
+    // Check if app was opened with a deep link (cold start)
+    Linking.getInitialURL().then(async (url) => {
       if (url) {
         const { path, queryParams } = Linking.parse(url);
+
+        // Handle auth callback on app launch
+        await handleAuthCallback(url);
+
+        // Handle share links
         if (path === 'share' && queryParams?.slug) {
           router.push(`/share/${queryParams.slug}`);
         }
@@ -91,7 +166,7 @@ function RootLayoutNav() {
     return () => {
       subscription.remove();
     };
-  }, []);
+  }, [router]);
 
   return (
     <Stack>
