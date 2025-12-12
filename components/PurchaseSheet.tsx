@@ -207,7 +207,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
                     <Text style={styles.productDescription}>
                       Adds +10 creations & +10 saves
                     </Text>
-                    <Text style={styles.productPrice}>$2.99</Text>
+                    <Text style={styles.productPrice}>$5.00</Text>
                   </View>
                   <Pressable
                     onPress={() => handlePurchasePack('credits_10')}
@@ -231,7 +231,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
                     <Text style={styles.productDescription}>
                       Adds +25 creations & +25 saves
                     </Text>
-                    <Text style={styles.productPrice}>$5.99</Text>
+                    <Text style={styles.productPrice}>$10.00</Text>
                   </View>
                   <Pressable
                     onPress={() => handlePurchasePack('credits_25')}
@@ -252,7 +252,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
                     <Text style={styles.productDescription}>
                       Adds +60 creations & +60 saves
                     </Text>
-                    <Text style={styles.productPrice}>$12.99</Text>
+                    <Text style={styles.productPrice}>$20.00</Text>
                     <Text style={styles.productNote}>Best value</Text>
                   </View>
                   <Pressable
@@ -282,6 +282,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
                     <Text style={styles.productDescription}>
                       Unlimited creations and Save Slots forever. No limits.
                     </Text>
+                    <Text style={styles.productPrice}>$4.99/month</Text>
                     <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
                   </View>
                   <Pressable
@@ -303,6 +304,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
                     <Text style={styles.productDescription}>
                       Unlimited creations and Save Slots forever. Best value for frequent sellers.
                     </Text>
+                    <Text style={styles.productPrice}>$35.99/year</Text>
                     <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
                   </View>
                   <Pressable

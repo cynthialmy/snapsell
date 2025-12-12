@@ -165,6 +165,7 @@ export default function PurchaseScreen() {
               <Text style={styles.productDescription}>
                 Save 10 listings to your account. Save Slots never expire and can be used anytime.
               </Text>
+              <Text style={styles.productPrice}>$5.00</Text>
               <Text style={styles.productNote}>
                 Creating listings is always free. Save Slots are only used when you save a listing.
               </Text>
@@ -188,6 +189,7 @@ export default function PurchaseScreen() {
               <Text style={styles.productDescription}>
                 Save 25 listings to your account. Save Slots never expire and can be used anytime.
               </Text>
+              <Text style={styles.productPrice}>$10.00</Text>
               <Text style={styles.productNote}>
                 Creating listings is always free. Save Slots are only used when you save a listing.
               </Text>
@@ -211,6 +213,7 @@ export default function PurchaseScreen() {
               <Text style={styles.productDescription}>
                 Save 60 listings to your account. Save Slots never expire and can be used anytime.
               </Text>
+              <Text style={styles.productPrice}>$20.00</Text>
               <Text style={styles.productNote}>
                 Creating listings is always free. Save Slots are only used when you save a listing.
               </Text>
@@ -242,6 +245,7 @@ export default function PurchaseScreen() {
               <Text style={styles.productDescription}>
                 Unlimited Save Slots forever. Save as many listings as you want, no limits.
               </Text>
+              <Text style={styles.productPrice}>$4.99/month</Text>
               <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
             </View>
             <Pressable
@@ -263,6 +267,7 @@ export default function PurchaseScreen() {
               <Text style={styles.productDescription}>
                 Unlimited Save Slots forever. Best value for frequent sellers.
               </Text>
+              <Text style={styles.productPrice}>$35.99/year</Text>
               <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
             </View>
             <Pressable
@@ -343,6 +348,13 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginBottom: 4,
     lineHeight: 20,
+  },
+  productPrice: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginTop: 8,
+    marginBottom: 4,
   },
   productNote: {
     fontSize: 12,
