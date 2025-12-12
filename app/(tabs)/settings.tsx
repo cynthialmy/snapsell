@@ -44,6 +44,28 @@ export default function SettingsScreen() {
     loadUserPreferences();
   }, [user]);
 
+  const loadQuota = useCallback(async () => {
+    if (!user) {
+      setQuotaLoading(false);
+      return;
+    }
+
+    try {
+      const { quota: userQuota, error } = await checkQuota();
+      if (error) {
+        // Silently handle backend not configured or unavailable
+        setQuota(null);
+      } else if (userQuota) {
+        setQuota(userQuota);
+      }
+    } catch (error) {
+      // Silently handle errors - backend might not be set up yet
+      setQuota(null);
+    } finally {
+      setQuotaLoading(false);
+    }
+  }, [user]);
+
   // Reload quota when screen comes into focus
   useFocusEffect(
     useCallback(() => {
@@ -75,28 +97,6 @@ export default function SettingsScreen() {
       prevPickupNotesRef.current = loadedPickupNotes;
     }
   };
-
-  const loadQuota = useCallback(async () => {
-    if (!user) {
-      setQuotaLoading(false);
-      return;
-    }
-
-    try {
-      const { quota: userQuota, error } = await checkQuota();
-      if (error) {
-        // Silently handle backend not configured or unavailable
-        setQuota(null);
-      } else if (userQuota) {
-        setQuota(userQuota);
-      }
-    } catch (error) {
-      // Silently handle errors - backend might not be set up yet
-      setQuota(null);
-    } finally {
-      setQuotaLoading(false);
-    }
-  }, [user]);
 
   const saveUserPreferences = async () => {
     const prefs: UserPreferences = {
@@ -235,38 +235,71 @@ export default function SettingsScreen() {
               <Text style={styles.quotaText}>Loading...</Text>
             ) : quota ? (
               <View style={styles.quotaContainer}>
-                {/* Creation Quota */}
-                <View style={styles.quotaItem}>
-                  <Text style={styles.quotaLabel}>Creating Listings</Text>
-                  <Text style={styles.quotaText}>
-                    {quota.creations_daily_limit - quota.creations_remaining_today} / {quota.creations_daily_limit} used today
-                  </Text>
-                  <Text style={styles.quotaSubtext}>
-                    {quota.creations_remaining_today} remaining today
-                    {quota.bonus_creations_remaining > 0 && ` • ${quota.bonus_creations_remaining} bonus remaining`}
-                  </Text>
-                  {quota.creations_remaining_today === 0 && quota.bonus_creations_remaining === 0 && (
-                    <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
-                      <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
-                    </Pressable>
-                  )}
-                </View>
+                {quota.is_pro ? (
+                  <View style={styles.quotaItem}>
+                    <Text style={styles.quotaLabel}>Pro Member</Text>
+                    <Text style={styles.quotaText}>Unlimited creations and Save Slots</Text>
+                  </View>
+                ) : (
+                  <>
+                    {/* Creations Section */}
+                    <View style={styles.quotaItem}>
+                      {quota.creations ? (
+                        <>
+                          <Text style={styles.quotaText}>
+                            Creations left: {quota.creations.total_remaining} total
+                          </Text>
+                          <Text style={styles.quotaSubtext}>
+                            Free left today: {quota.creations.free_remaining_today} + Purchased: {quota.creations.purchased_remaining}
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <Text style={styles.quotaText}>
+                            Creations left: {quota.creations_remaining_today + quota.bonus_creations_remaining} total
+                          </Text>
+                          <Text style={styles.quotaSubtext}>
+                            Free left today: {quota.creations_remaining_today}
+                            {quota.bonus_creations_remaining > 0 && ` + Purchased: ${quota.bonus_creations_remaining}`}
+                          </Text>
+                        </>
+                      )}
+                      {(quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining)) === 0 && (
+                        <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
+                          <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
+                        </Pressable>
+                      )}
+                    </View>
 
-                {/* Save Slots Quota */}
-                <View style={[styles.quotaItem, styles.quotaItemSeparator]}>
-                  <Text style={styles.quotaLabel}>Save Slots</Text>
-                  <Text style={styles.quotaText}>
-                    {quota.free_save_slots - quota.save_slots_remaining} / {quota.free_save_slots} used
-                  </Text>
-                  <Text style={styles.quotaSubtext}>
-                    {quota.save_slots_remaining} Save Slots remaining
-                  </Text>
-                  {quota.save_slots_remaining === 0 && (
-                    <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
-                      <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
-                    </Pressable>
-                  )}
-                </View>
+                    {/* Save Slots Section */}
+                    <View style={[styles.quotaItem, styles.quotaItemSeparator]}>
+                      {quota.saves ? (
+                        <>
+                          <Text style={styles.quotaText}>
+                            Save Slots: {quota.saves.total_slots} total
+                          </Text>
+                          <Text style={styles.quotaSubtext}>
+                            Free: {quota.saves.free_slots} + Purchased: {quota.saves.purchased_slots}
+                          </Text>
+                        </>
+                      ) : (
+                        <>
+                          <Text style={styles.quotaText}>
+                            Save Slots: {quota.save_slots_remaining} total
+                          </Text>
+                          <Text style={styles.quotaSubtext}>
+                            Free: {quota.save_slots_remaining}
+                          </Text>
+                        </>
+                      )}
+                      {(quota.saves?.total_slots ?? quota.save_slots_remaining) === 0 && (
+                        <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
+                          <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  </>
+                )}
               </View>
             ) : (
               <Text style={styles.quotaText}>Unable to load quota</Text>
@@ -448,6 +481,7 @@ const styles = StyleSheet.create({
   quotaSubtext: {
     fontSize: 14,
     color: '#64748B',
+    marginBottom: 4,
   },
   upgradeButton: {
     backgroundColor: '#4338CA',

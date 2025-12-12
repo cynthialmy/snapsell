@@ -1,23 +1,24 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent, trackScreenView } from '@/utils/analytics';
-import { checkQuota, type UserQuota } from '@/utils/listings-api';
+import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { getPaymentHistory, type PaymentHistoryItem } from '@/utils/payments';
 
 export default function UpgradeScreen() {
   const router = useRouter();
   const { user } = useAuth();
   const [quota, setQuota] = useState<UserQuota | null>(null);
+  const [anonymousQuota, setAnonymousQuota] = useState<AnonymousQuota | null>(null);
   const [loading, setLoading] = useState(true);
   const [paymentHistory, setPaymentHistory] = useState<PaymentHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -25,10 +26,25 @@ export default function UpgradeScreen() {
 
   const loadQuota = useCallback(async () => {
     if (!user) {
-      setLoading(false);
+      // Load anonymous quota for non-logged-in users
+      try {
+        const { quota: anonQuota, error } = await checkAnonymousQuota();
+        if (error) {
+          console.error('Error loading anonymous quota:', error);
+          setAnonymousQuota(null);
+        } else {
+          setAnonymousQuota(anonQuota);
+        }
+      } catch (error) {
+        console.error('Error loading anonymous quota:', error);
+        setAnonymousQuota(null);
+      } finally {
+        setLoading(false);
+      }
       return;
     }
 
+    // Load user quota for logged-in users
     try {
       const { quota: userQuota, error } = await checkQuota();
       if (error) {
@@ -98,28 +114,78 @@ export default function UpgradeScreen() {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
         <Text style={styles.title}>Upgrade & Save Slots</Text>
 
-        {quota && (
+        {/* Current Usage Card */}
+        {(quota || anonymousQuota) && (
           <View style={styles.quotaCard}>
             <Text style={styles.quotaTitle}>Current Usage</Text>
-            {quota.is_pro ? (
-              <>
-                <Text style={styles.quotaText}>Pro Member</Text>
-                <Text style={styles.quotaSubtext}>
-                  Unlimited creations and Save Slots
-                </Text>
-              </>
-            ) : (
+
+            {/* Non-logged-in users */}
+            {!user && anonymousQuota && (
               <>
                 <Text style={styles.quotaText}>
-                  Creations: {quota.creations_remaining_today} / {quota.creations_daily_limit} left today
+                  Creations left today: {anonymousQuota.creations_remaining_today}/{anonymousQuota.creations_daily_limit}
                 </Text>
                 <Text style={styles.quotaSubtext}>
-                  Save Slots: {quota.save_slots_remaining} remaining
+                  Save requires login.
                 </Text>
-                {quota.bonus_creations_remaining > 0 && (
-                  <Text style={styles.quotaSubtext}>
-                    Bonus creations: {quota.bonus_creations_remaining} remaining
-                  </Text>
+              </>
+            )}
+
+            {/* Logged-in users */}
+            {user && quota && (
+              <>
+                {quota.is_pro ? (
+                  <>
+                    <Text style={styles.quotaText}>Pro Member</Text>
+                    <Text style={styles.quotaSubtext}>
+                      Unlimited creations and Save Slots
+                    </Text>
+                  </>
+                ) : (
+                  <>
+                    {/* Creations Section */}
+                    {quota.creations ? (
+                      <>
+                        <Text style={styles.quotaText}>
+                          Creations left: {quota.creations.total_remaining} total
+                        </Text>
+                        <Text style={styles.quotaSubtext}>
+                          Free left today: {quota.creations.free_remaining_today} + Purchased: {quota.creations.purchased_remaining}
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.quotaText}>
+                          Creations left: {quota.creations_remaining_today + quota.bonus_creations_remaining} total
+                        </Text>
+                        <Text style={styles.quotaSubtext}>
+                          Free left today: {quota.creations_remaining_today}
+                          {quota.bonus_creations_remaining > 0 && ` + Purchased: ${quota.bonus_creations_remaining}`}
+                        </Text>
+                      </>
+                    )}
+
+                    {/* Saves Section */}
+                    {quota.saves ? (
+                      <>
+                        <Text style={styles.quotaText}>
+                          Save Slots: {quota.saves.total_slots} total
+                        </Text>
+                        <Text style={styles.quotaSubtext}>
+                          Free: {quota.saves.free_slots} + Purchased: {quota.saves.purchased_slots}
+                        </Text>
+                      </>
+                    ) : (
+                      <>
+                        <Text style={styles.quotaText}>
+                          Save Slots: {quota.save_slots_remaining} total
+                        </Text>
+                        <Text style={styles.quotaSubtext}>
+                          Free: {quota.save_slots_remaining}
+                        </Text>
+                      </>
+                    )}
+                  </>
                 )}
               </>
             )}
@@ -217,12 +283,6 @@ export default function UpgradeScreen() {
             )}
           </View>
         )}
-
-        <View style={styles.noteSection}>
-          <Text style={styles.noteText}>
-            Payments are processed securely through Stripe Checkout. Your account will be updated automatically after payment confirmation.
-          </Text>
-        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -272,8 +332,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   quotaText: {
-    fontSize: 24,
-    fontWeight: '700',
+    fontSize: 16,
+    fontWeight: '600',
     color: '#0F172A',
     marginBottom: 4,
   },
@@ -349,20 +409,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontWeight: '600',
     marginLeft: 8,
-  },
-  noteSection: {
-    marginTop: 16,
-    padding: 16,
-    backgroundColor: '#F8FAFC',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  noteText: {
-    fontSize: 12,
-    color: '#64748B',
-    lineHeight: 18,
-    textAlign: 'center',
   },
   historyCard: {
     backgroundColor: '#FFFFFF',

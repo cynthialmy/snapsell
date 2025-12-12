@@ -1,6 +1,7 @@
 import { Platform } from 'react-native';
 import { trackError } from './analytics';
 import { supabase } from './auth';
+import type { UserQuota } from './listings-api';
 
 export type ListingData = {
   title: string;
@@ -12,6 +13,11 @@ export type ListingData = {
   pickupAvailable?: boolean;
   shippingAvailable?: boolean;
   pickupNotes?: string;
+};
+
+export type AnalyzeImageResponse = {
+  listing: ListingData;
+  quota?: UserQuota | null;
 };
 
 type AnalyzeOptions = {
@@ -204,7 +210,7 @@ function isAbortError(error: unknown): boolean {
   return false;
 }
 
-export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<ListingData> {
+export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<AnalyzeImageResponse> {
   const {
     uri,
     filename = 'snapsell-item.jpg',
@@ -306,19 +312,31 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
       if (!response.ok) {
         // Try to parse error response as JSON (Supabase Edge Functions return JSON errors)
         let errorMessage = 'Failed to analyze photo. Please try again.';
+        let errorData: any = {};
         try {
-          const errorData = await response.json();
+          errorData = await response.json();
           errorMessage = errorData.detail || errorData.error || errorData.message || errorMessage;
         } catch {
           // If JSON parsing fails, try as text
           const text = await response.text();
           errorMessage = text || errorMessage;
         }
-        const error = new Error(errorMessage);
-        lastError = error;
+
+        // Handle quota exceeded (402) - attach quota info to error
+        if (response.status === 402) {
+          const quotaError: any = new Error(errorMessage);
+          quotaError.code = 'QUOTA_EXCEEDED';
+          quotaError.creations_remaining_today = errorData.creations_remaining_today ?? 0;
+          quotaError.creations_daily_limit = errorData.creations_daily_limit ?? 0;
+          quotaError.bonus_creations_remaining = errorData.bonus_creations_remaining ?? 0;
+          lastError = quotaError;
+        } else {
+          const error = new Error(errorMessage);
+          lastError = error;
+        }
 
         // Track API error
-        trackError('api_error', error, {
+        trackError('api_error', lastError, {
           endpoint: endpointUrl,
           status_code: response.status,
           attempt,
@@ -326,19 +344,47 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
         });
 
         // Check if this error is retryable
-        if (isRetryableError(error, response) && attempt < maxAttempts) {
+        if (isRetryableError(lastError, response) && attempt < maxAttempts) {
           // Wait before retrying (1 second delay)
           await delay(1000);
           continue;
         }
 
-        throw error;
+        throw lastError;
       }
 
-      const json = (await response.json()) as ListingData;
+      const responseData = await response.json();
       console.log('[API] Successfully received listing data');
+      console.log('[API] Full response data keys:', Object.keys(responseData));
+      console.log('[API] Response quota object:', JSON.stringify(responseData.quota, null, 2));
+
+      // Extract quota if present (for authenticated users)
+      const quota = responseData.quota || null;
+      if (quota) {
+        console.log('[API] Extracted quota details:', {
+          creations_remaining_today: quota.creations_remaining_today,
+          creations_daily_limit: quota.creations_daily_limit,
+          bonus_creations_remaining: quota.bonus_creations_remaining,
+          save_slots_remaining: quota.save_slots_remaining,
+          is_pro: quota.is_pro,
+        });
+      }
+
+      const listing: ListingData = {
+        title: responseData.title || '',
+        price: responseData.price || '',
+        description: responseData.description || '',
+        condition: responseData.condition || '',
+        location: responseData.location || '',
+        brand: responseData.brand,
+        pickupAvailable: responseData.pickupAvailable,
+        shippingAvailable: responseData.shippingAvailable,
+        pickupNotes: responseData.pickupNotes,
+      };
+
+      console.log('[API] Response includes quota:', !!quota);
       onStatusChange?.(null);
-      return json;
+      return { listing, quota };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.log(`[API] Error on attempt ${attempt}/${maxAttempts}:`, errorMessage);

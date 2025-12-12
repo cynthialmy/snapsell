@@ -9,9 +9,11 @@ import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { AnimatedSplash } from '@/components/animated-splash';
+import { SnappyCelebration } from '@/components/SnappyCelebration';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 import { initializePostHog, trackEvent } from '@/utils/analytics';
+import { checkQuota } from '@/utils/listings-api';
 import { parsePaymentCallback, verifyPaymentStatus } from '@/utils/payments';
 
 // Prevent the native splash screen from auto-hiding
@@ -22,6 +24,9 @@ function RootLayoutNav() {
   const segments = useSegments();
   const router = useRouter();
   const colorScheme = useColorScheme();
+  const [showCelebration, setShowCelebration] = useState(false);
+  const [celebrationsAdded, setCelebrationsAdded] = useState(0);
+  const [savesAdded, setSavesAdded] = useState(0);
 
   useEffect(() => {
     if (loading) return;
@@ -213,34 +218,148 @@ function RootLayoutNav() {
           // The webhook processes payments automatically, so we just need to refresh user data
           router.push('/(tabs)/upgrade');
 
+          // Get quota before purchase to calculate difference
+          let quotaBefore: { quota: any } | null = null;
+          try {
+            const { quota } = await checkQuota();
+            quotaBefore = { quota };
+          } catch (e) {
+            // Ignore errors getting quota before
+          }
+
           // Wait 3 seconds for webhook to process, then refresh and verify
           setTimeout(async () => {
             try {
               // Refresh user data first (webhook should have processed by now)
               await refreshUser();
 
+              // Refresh quota after payment
+              const { quota: quotaAfter } = await checkQuota();
+
               // Try to verify payment status
               try {
                 const result = await verifyPaymentStatus(sessionId);
+
+                // Determine what was added based on payment type
+                let creationsAdded = 0;
+                let savesAdded = 0;
+
+                if (result.payment.type === 'credits' || result.payment.credits) {
+                  // Pack purchase - credits field contains the amount added
+                  const creditsAdded = result.payment.credits || 0;
+
+                  if (creditsAdded > 0) {
+                    creationsAdded = creditsAdded;
+                    savesAdded = creditsAdded;
+
+                    // Show celebration modal
+                    setCelebrationsAdded(creationsAdded);
+                    setSavesAdded(savesAdded);
+                    setShowCelebration(true);
+                  } else {
+                    // Credits is 0 or missing, try to calculate from quota difference
+                    if (quotaBefore?.quota && quotaAfter) {
+                      creationsAdded = Math.max(0,
+                        (quotaAfter.bonus_creations_remaining || 0) - (quotaBefore.quota.bonus_creations_remaining || 0)
+                      );
+                      savesAdded = Math.max(0,
+                        quotaAfter.free_save_slots - quotaBefore.quota.free_save_slots
+                      );
+
+                      if (creationsAdded > 0 || savesAdded > 0) {
+                        setCelebrationsAdded(creationsAdded);
+                        setSavesAdded(savesAdded);
+                        setShowCelebration(true);
+                      } else {
+                        Alert.alert(
+                          'Payment Successful',
+                          `You now have ${quotaAfter.save_slots_remaining} Save Slots remaining.`
+                        );
+                      }
+                    } else {
+                      Alert.alert(
+                        'Payment Successful',
+                        'Your payment has been processed. Your account has been updated.'
+                      );
+                    }
+                  }
+                } else if (result.payment.type === 'subscription') {
+                  // Subscription - unlimited, no specific amounts to show
+                  Alert.alert(
+                    'Payment Successful',
+                    'You now have Pro! Enjoy unlimited creations and Save Slots.'
+                  );
+                } else {
+                  // Fallback: try to calculate from quota difference
+                  if (quotaBefore?.quota && quotaAfter) {
+                    // Calculate creations added: compare bonus_creations_remaining
+                    creationsAdded = Math.max(0,
+                      (quotaAfter.bonus_creations_remaining || 0) - (quotaBefore.quota.bonus_creations_remaining || 0)
+                    );
+                    // Calculate saves added: compare free_save_slots (total available)
+                    savesAdded = Math.max(0,
+                      quotaAfter.free_save_slots - quotaBefore.quota.free_save_slots
+                    );
+
+                    if (creationsAdded > 0 || savesAdded > 0) {
+                      setCelebrationsAdded(creationsAdded);
+                      setSavesAdded(savesAdded);
+                      setShowCelebration(true);
+                    } else {
+                      Alert.alert(
+                        'Payment Successful',
+                        `You now have ${quotaAfter.save_slots_remaining} Save Slots remaining.`
+                      );
+                    }
+                  } else {
+                    Alert.alert(
+                      'Payment Successful',
+                      'Your payment has been processed. Your account has been updated.'
+                    );
+                  }
+                }
+
                 trackEvent('purchase_completed', {
                   session_id: sessionId,
-                  credits: result.user.credits,
+                  credits: result.payment.credits,
+                  type: result.payment.type,
+                  creations_added: creationsAdded,
+                  saves_added: savesAdded,
                 });
-                Alert.alert(
-                  'Payment Successful',
-                  `You now have ${result.user.credits} credits!`
-                );
               } catch (verifyError) {
                 // Verification failed, but webhook might have processed it
-                // Just show a generic success message
+                // Try to show celebration based on quota difference
+                if (quotaBefore?.quota && quotaAfter) {
+                  const creationsAdded = Math.max(0,
+                    (quotaAfter.creations_remaining_today + (quotaAfter.creations_daily_limit - quotaAfter.creations_remaining_today)) -
+                    (quotaBefore.quota.creations_remaining_today + (quotaBefore.quota.creations_daily_limit - quotaBefore.quota.creations_remaining_today))
+                  );
+                  const savesAdded = Math.max(0,
+                    (quotaAfter.free_save_slots - quotaAfter.save_slots_remaining) -
+                    (quotaBefore.quota.free_save_slots - quotaBefore.quota.save_slots_remaining)
+                  );
+
+                  if (creationsAdded > 0 || savesAdded > 0) {
+                    setCelebrationsAdded(creationsAdded);
+                    setSavesAdded(savesAdded);
+                    setShowCelebration(true);
+                  } else {
+                    Alert.alert(
+                      'Payment Successful',
+                      'Your payment has been processed. Your Save Slots will be updated shortly.'
+                    );
+                  }
+                } else {
+                  Alert.alert(
+                    'Payment Successful',
+                    'Your payment has been processed. Your Save Slots will be updated shortly.'
+                  );
+                }
+
                 trackEvent('purchase_completed', {
                   session_id: sessionId,
                   verified: false,
                 });
-                Alert.alert(
-                  'Payment Successful',
-                  'Your payment has been processed. Your credits will be updated shortly.'
-                );
               }
             } catch (error: any) {
               console.error('Error refreshing user after payment:', error);
@@ -298,36 +417,121 @@ function RootLayoutNav() {
             // The webhook processes payments automatically, so we just need to refresh user data
             router.push('/(tabs)/upgrade');
 
+            // Get quota before purchase to calculate difference
+            let quotaBefore: { quota: any } | null = null;
+            try {
+              const { quota } = await checkQuota();
+              quotaBefore = { quota };
+            } catch (e) {
+              // Ignore errors getting quota before
+            }
+
             // Wait 3 seconds for webhook to process, then refresh and verify
             setTimeout(async () => {
               try {
                 // Refresh user data first (webhook should have processed by now)
                 await refreshUser();
 
+                // Refresh quota after payment
+                const { quota: quotaAfter } = await checkQuota();
+
                 // Try to verify payment status
                 try {
                   const result = await verifyPaymentStatus(sessionId);
+
+                  // Determine what was added based on payment type
+                  let creationsAdded = 0;
+                  let savesAdded = 0;
+
+                  if (result.payment.type === 'credits') {
+                    // Pack purchase - credits field contains the amount added
+                    const creditsAdded = result.payment.credits || 0;
+                    creationsAdded = creditsAdded;
+                    savesAdded = creditsAdded;
+
+                    // Show celebration modal
+                    setCelebrationsAdded(creationsAdded);
+                    setSavesAdded(savesAdded);
+                    setShowCelebration(true);
+                  } else if (result.payment.type === 'subscription') {
+                    // Subscription - unlimited, no specific amounts to show
+                    Alert.alert(
+                      'Payment Successful',
+                      'You now have Pro! Enjoy unlimited creations and Save Slots.'
+                    );
+                  } else {
+                    // Fallback: try to calculate from quota difference
+                    if (quotaBefore?.quota && quotaAfter) {
+                      // Calculate creations added: compare bonus_creations_remaining
+                      creationsAdded = Math.max(0,
+                        (quotaAfter.bonus_creations_remaining || 0) - (quotaBefore.quota.bonus_creations_remaining || 0)
+                      );
+                      // Calculate saves added: compare free_save_slots (total available)
+                      savesAdded = Math.max(0,
+                        quotaAfter.free_save_slots - quotaBefore.quota.free_save_slots
+                      );
+
+                      if (creationsAdded > 0 || savesAdded > 0) {
+                        setCelebrationsAdded(creationsAdded);
+                        setSavesAdded(savesAdded);
+                        setShowCelebration(true);
+                      } else {
+                        Alert.alert(
+                          'Payment Successful',
+                          `You now have ${quotaAfter.save_slots_remaining} Save Slots remaining.`
+                        );
+                      }
+                    } else {
+                      Alert.alert(
+                        'Payment Successful',
+                        'Your payment has been processed. Your account has been updated.'
+                      );
+                    }
+                  }
+
                   trackEvent('purchase_completed', {
                     session_id: sessionId,
-                    credits: result.user.credits,
+                    credits: result.payment.credits,
+                    type: result.payment.type,
+                    creations_added: creationsAdded,
+                    saves_added: savesAdded,
                     source: 'cold_start',
                   });
-                  Alert.alert(
-                    'Payment Successful',
-                    `You now have ${result.user.credits} Save Slots!`
-                  );
                 } catch (verifyError) {
                   // Verification failed, but webhook might have processed it
-                  // Just show a generic success message
+                  // Try to show celebration based on quota difference
+                  if (quotaBefore?.quota && quotaAfter) {
+                    // Calculate creations added: compare bonus_creations_remaining
+                    const creationsAdded = Math.max(0,
+                      (quotaAfter.bonus_creations_remaining || 0) - (quotaBefore.quota.bonus_creations_remaining || 0)
+                    );
+                    // Calculate saves added: compare free_save_slots (total available)
+                    const savesAdded = Math.max(0,
+                      quotaAfter.free_save_slots - quotaBefore.quota.free_save_slots
+                    );
+
+                    if (creationsAdded > 0 || savesAdded > 0) {
+                      setCelebrationsAdded(creationsAdded);
+                      setSavesAdded(savesAdded);
+                      setShowCelebration(true);
+                    } else {
+                      Alert.alert(
+                        'Payment Successful',
+                        'Your payment has been processed. Your Save Slots will be updated shortly.'
+                      );
+                    }
+                  } else {
+                    Alert.alert(
+                      'Payment Successful',
+                      'Your payment has been processed. Your Save Slots will be updated shortly.'
+                    );
+                  }
+
                   trackEvent('purchase_completed', {
                     session_id: sessionId,
                     verified: false,
                     source: 'cold_start',
                   });
-                  Alert.alert(
-                    'Payment Successful',
-                    'Your payment has been processed. Your Save Slots will be updated shortly.'
-                  );
                 }
               } catch (error: any) {
                 console.error('Error refreshing user after payment:', error);
@@ -367,36 +571,48 @@ function RootLayoutNav() {
   }, [router]);
 
   return (
-    <Stack>
-      <Stack.Screen name="(auth)" options={{ headerShown: false }} />
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      <Stack.Screen name="index" options={{ headerShown: false }} />
-      <Stack.Screen
-        name="share/[slug]"
-        options={{
-          title: 'Shared Listing',
-          headerShown: true,
+    <>
+      <Stack>
+        <Stack.Screen name="(auth)" options={{ headerShown: false }} />
+        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="index" options={{ headerShown: false }} />
+        <Stack.Screen
+          name="share/[slug]"
+          options={{
+            title: 'Shared Listing',
+            headerShown: true,
+          }}
+        />
+        <Stack.Screen
+          name="profile"
+          options={{
+            title: 'Profile',
+            headerShown: true,
+            presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+            animation: Platform.OS === 'ios' ? 'default' : 'slide_from_bottom',
+          }}
+        />
+        <Stack.Screen
+          name="purchase"
+          options={{
+            title: 'Purchase Options',
+            headerShown: true,
+            presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+            animation: Platform.OS === 'ios' ? 'default' : 'slide_from_bottom',
+          }}
+        />
+      </Stack>
+      <SnappyCelebration
+        visible={showCelebration}
+        creationsAdded={celebrationsAdded}
+        savesAdded={savesAdded}
+        onComplete={() => {
+          setShowCelebration(false);
+          // Refresh quota in upgrade screen when user navigates there
+          // The upgrade screen will refresh on focus
         }}
       />
-      <Stack.Screen
-        name="profile"
-        options={{
-          title: 'Profile',
-          headerShown: true,
-          presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-          animation: Platform.OS === 'ios' ? 'default' : 'slide_from_bottom',
-        }}
-      />
-      <Stack.Screen
-        name="purchase"
-        options={{
-          title: 'Purchase Options',
-          headerShown: true,
-          presentation: Platform.OS === 'ios' ? 'modal' : 'card',
-          animation: Platform.OS === 'ios' ? 'default' : 'slide_from_bottom',
-        }}
-      />
-    </Stack>
+    </>
   );
 }
 

@@ -170,7 +170,18 @@ export default function ListingPreviewScreen() {
         has_payload: !!payload,
         has_listing_id: !!params.listingId,
       });
-    }, [backendListingId, payload, params.listingId])
+
+      // Refresh quota when screen comes into focus (e.g., after returning from save)
+      if (user) {
+        checkQuota().then(({ quota: userQuota }) => {
+          if (userQuota) {
+            setQuota(userQuota);
+          }
+        }).catch((error) => {
+          console.warn('[Listing Preview] Failed to refresh quota on focus:', error);
+        });
+      }
+    }, [backendListingId, payload, params.listingId, user])
   );
 
   // Track field-level edits
@@ -1024,7 +1035,7 @@ export default function ListingPreviewScreen() {
           });
 
           console.log('[Listing Save] Calling createListing API...');
-          const { listing: backendListing, error: createError } = await createListing({
+          const createResult = await createListing({
             title,
             description,
             price_cents: priceCents,
@@ -1034,11 +1045,30 @@ export default function ListingPreviewScreen() {
             visibility: 'private',
           });
 
+          const backendListing = createResult.listing;
+          const createError = createResult.error;
+
+          // Extract quota from response - quota is present when error is null (success case)
+          // TypeScript doesn't narrow union types well, so we check error first
+          let returnedQuota: UserQuota | null = null;
+          if (!createError && backendListing) {
+            // Success case - quota should be in the response
+            const successResult = createResult as { listing: any; quota: UserQuota | null; error: null };
+            returnedQuota = successResult.quota || null;
+            console.log('[Listing Save] Extracted quota from response:', {
+              hasQuota: !!returnedQuota,
+              creations_remaining: returnedQuota?.creations_remaining_today,
+              save_slots_remaining: returnedQuota?.save_slots_remaining,
+            });
+          }
+
           console.log('[Listing Save] createListing response:', {
             hasListing: !!backendListing,
+            hasQuota: !!returnedQuota,
             hasError: !!createError,
             error: createError,
             listingId: backendListing?.id,
+            quotaKeys: returnedQuota ? Object.keys(returnedQuota) : [],
           });
 
           if (createError) {
@@ -1076,9 +1106,9 @@ export default function ListingPreviewScreen() {
             savedListingId = backendListing.id;
             setBackendListingId(backendListing.id);
 
-            // Refresh quota after save
+            // Use quota from response if available, otherwise refresh quota
             try {
-              const { quota: updatedQuota } = await checkQuota();
+              const updatedQuota = returnedQuota || (await checkQuota()).quota;
               if (updatedQuota) {
                 setQuota(updatedQuota);
 

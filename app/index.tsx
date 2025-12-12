@@ -4,14 +4,14 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -87,6 +87,12 @@ export default function HomeScreen() {
       // Check quota if user is authenticated
       if (user) {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
+        console.log('[Image Analysis] Quota BEFORE analysis:', {
+          creations_remaining: currentQuota?.creations_remaining_today,
+          creations_daily_limit: currentQuota?.creations_daily_limit,
+          save_slots_remaining: currentQuota?.save_slots_remaining,
+          is_pro: currentQuota?.is_pro,
+        });
         trackEvent('quota_checked', {
           has_quota: !!currentQuota,
           creations_remaining: currentQuota?.creations_remaining_today,
@@ -111,7 +117,7 @@ export default function HomeScreen() {
       const preferences = await loadPreferences();
       const currency = preferences?.currency || '$';
 
-      const listing = await analyzeItemPhoto({
+      const { listing, quota: returnedQuota } = await analyzeItemPhoto({
         uri: asset.uri,
         filename: asset.fileName ?? 'snapsell-item.jpg',
         mimeType: asset.mimeType ?? 'image/jpeg',
@@ -178,16 +184,29 @@ export default function HomeScreen() {
       // This prevents "Untitled Listing" entries from being created
       navigateToPreview({ listing, imageUri: asset.uri, storagePath });
 
-      // Reload quota after successful listing creation
+      // Use quota from response if available (for authenticated users), otherwise refresh quota
       if (user) {
-        const { quota: updatedQuota } = await loadQuota();
-        // Show low quota nudge if creations <= 2
-        if (updatedQuota && !updatedQuota.is_pro && updatedQuota.creations_remaining_today <= 2) {
-          trackEvent('low_quota_nudge_shown', {
-            type: 'creation',
-            remaining: updatedQuota.creations_remaining_today,
+        const updatedQuota = returnedQuota || await loadQuota();
+        if (updatedQuota) {
+          // Update quota state immediately
+          console.log('[Image Analysis] Updating quota after analysis:', {
+            creations_remaining: updatedQuota.creations_remaining_today,
+            save_slots_remaining: updatedQuota.save_slots_remaining,
+            is_pro: updatedQuota.is_pro,
+            fromResponse: !!returnedQuota,
           });
-          setShowLowQuotaNudge(true);
+          setQuota(updatedQuota);
+
+          // Show low quota nudge if creations <= 2
+          if (!updatedQuota.is_pro && updatedQuota.creations_remaining_today <= 2) {
+            trackEvent('low_quota_nudge_shown', {
+              type: 'creation',
+              remaining: updatedQuota.creations_remaining_today,
+            });
+            setShowLowQuotaNudge(true);
+          }
+        } else {
+          console.warn('[Image Analysis] No quota returned from analysis or loadQuota');
         }
       }
     } catch (error) {
@@ -433,10 +452,22 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <Text style={styles.eyebrow}>SNAPSELL</Text>
           {user && quota && !quota.is_pro && (
-            <QuotaCounterPill
-              remaining={quota.creations_remaining_today}
-              limit={quota.creations_daily_limit}
-            />
+            <View style={styles.quotaHeader}>
+              <QuotaCounterPill
+                remaining={
+                  quota.creations?.total_remaining ??
+                  (quota.creations_remaining_today + quota.bonus_creations_remaining)
+                }
+                limit={
+                  quota.creations?.total_remaining ??
+                  (quota.creations_remaining_today + quota.bonus_creations_remaining)
+                }
+                label="Creations left"
+              />
+              <Text style={styles.quotaBreakdown}>
+                Free left today: {quota.creations?.free_remaining_today ?? quota.creations_remaining_today} + Purchased: {quota.creations?.purchased_remaining ?? quota.bonus_creations_remaining}
+              </Text>
+            </View>
           )}
         </View>
         <Text style={styles.title}>Turn a single photo into a ready-to-post listing.</Text>
@@ -521,6 +552,15 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  quotaHeader: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  quotaBreakdown: {
+    fontSize: 10,
+    color: '#64748B',
+    textAlign: 'right',
   },
   eyebrow: {
     fontSize: 12,

@@ -60,7 +60,7 @@ export function QuotaCounterPill({ remaining, limit, label = 'Creations left tod
       accessibilityLabel={accessibilityLabel}
       accessibilityRole="text">
       <Text style={[styles.text, isLow && styles.textLow]}>
-        {label}: {remaining}/{limit}
+        {label}: {remaining} total
       </Text>
     </Animated.View>
   );

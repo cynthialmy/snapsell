@@ -566,11 +566,34 @@ export async function createListingFromImage(
 // ============================================
 
 /**
+ * Anonymous quota response structure (for non-logged-in users)
+ */
+export interface AnonymousQuota {
+  creations_used_today: number;
+  creations_remaining_today: number;
+  creations_daily_limit: number;
+  resets_at: string;
+}
+
+/**
  * User quota response structure
  */
 export interface UserQuota {
   user_id: string;
   is_pro: boolean;
+  // New detailed breakdown (preferred)
+  creations?: {
+    free_remaining_today: number;
+    purchased_remaining: number;
+    total_remaining: number;
+    daily_limit: number;
+  };
+  saves?: {
+    free_slots: number;
+    purchased_slots: number;
+    total_slots: number;
+  };
+  // Legacy fields (for backward compatibility)
   creations_remaining_today: number;
   creations_daily_limit: number;
   bonus_creations_remaining: number;
@@ -580,7 +603,69 @@ export interface UserQuota {
 }
 
 /**
- * Check current usage and quota
+ * Check anonymous quota (for non-logged-in users)
+ * Uses /anonymous-quota endpoint
+ */
+export async function checkAnonymousQuota(): Promise<{ quota: AnonymousQuota | null; error: any | null }> {
+  try {
+    // Check if Edge Function URL is configured
+    if (!EDGE_FUNCTION_BASE || EDGE_FUNCTION_BASE.includes('YOUR_') || EDGE_FUNCTION_BASE.includes('your_')) {
+      // Backend not configured yet - return null quota silently
+      return { quota: null, error: { message: 'Backend not configured' } };
+    }
+
+    const response = await fetch(`${EDGE_FUNCTION_BASE}/anonymous-quota`, {
+      method: 'GET',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+    });
+
+    if (!response.ok) {
+      // Try to parse error, but handle cases where response isn't JSON
+      let errorMessage = 'Failed to check anonymous quota';
+      let errorDetails: any = null;
+      try {
+        const error = await response.json();
+        errorMessage = error.error || error.message || errorMessage;
+        errorDetails = error.details || error.error || null;
+      } catch {
+        errorMessage = `Server error (${response.status})`;
+      }
+
+      // Log detailed error for debugging
+      if (response.status >= 500) {
+        console.error('Check anonymous quota backend error:', {
+          status: response.status,
+          message: errorMessage,
+          details: errorDetails,
+        });
+      } else if (response.status < 500) {
+        console.warn('Check anonymous quota error:', errorMessage);
+      }
+
+      return { quota: null, error: { message: errorMessage, details: errorDetails, status: response.status } };
+    }
+
+    const data: AnonymousQuota = await response.json();
+    return { quota: data, error: null };
+  } catch (error: any) {
+    // Don't log network errors or backend unavailable errors - these are expected during setup
+    const errorMessage = error?.message || 'Failed to check anonymous quota';
+    const isNetworkError = errorMessage.includes('fetch') ||
+      errorMessage.includes('network') ||
+      errorMessage.includes('Failed to fetch');
+
+    if (!isNetworkError) {
+      console.warn('Check anonymous quota error:', errorMessage);
+    }
+
+    return { quota: null, error: { message: errorMessage } };
+  }
+}
+
+/**
+ * Check current usage and quota (for logged-in users)
  * Uses new /user-quota endpoint
  */
 export async function checkQuota(): Promise<{ quota: UserQuota | null; error: any | null }> {
