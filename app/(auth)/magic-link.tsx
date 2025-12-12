@@ -1,16 +1,23 @@
-import { useRouter, useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import * as Linking from 'expo-linking';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import * as Linking from 'expo-linking';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { trackScreenView } from '@/utils/analytics';
 
 export default function MagicLinkScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user } = useAuth();
   const [email, setEmail] = useState<string>('');
+
+  useFocusEffect(
+    useCallback(() => {
+      trackScreenView('magic-link');
+    }, [])
+  );
 
   useEffect(() => {
     // Check if we have an email in params

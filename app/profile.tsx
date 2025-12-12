@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Alert,
     KeyboardAvoidingView,
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { deleteAccount, getUserProfile, signOut, updateUserProfile } from '@/utils/auth';
 
 export default function ProfileScreen() {
@@ -23,6 +24,13 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(false);
   const [profileLoading, setProfileLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const prevDisplayNameRef = useRef<string>('');
+
+  useFocusEffect(
+    useCallback(() => {
+      trackScreenView('profile');
+    }, [])
+  );
 
   useEffect(() => {
     loadProfile();
@@ -39,11 +47,9 @@ export default function ProfileScreen() {
       console.log('Profile not found, will create on update');
     }
 
-    if (profile) {
-      setDisplayName(profile.display_name || user.email?.split('@')[0] || '');
-    } else {
-      setDisplayName(user.email?.split('@')[0] || '');
-    }
+    const loadedDisplayName = profile?.display_name || user.email?.split('@')[0] || '';
+    setDisplayName(loadedDisplayName);
+    prevDisplayNameRef.current = loadedDisplayName;
 
     setProfileLoading(false);
   };
@@ -64,6 +70,16 @@ export default function ProfileScreen() {
       return;
     }
 
+    // Track profile update
+    if (displayName !== prevDisplayNameRef.current) {
+      trackEvent('profile_updated', {
+        field_name: 'display_name',
+        old_value: prevDisplayNameRef.current,
+        new_value: displayName,
+      });
+      prevDisplayNameRef.current = displayName;
+    }
+
     Alert.alert('Success', 'Profile updated successfully');
     setLoading(false);
   };
@@ -78,6 +94,7 @@ export default function ProfileScreen() {
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            trackEvent('account_deletion_initiated');
             try {
               const { error } = await deleteAccount();
               if (error) {
@@ -88,6 +105,7 @@ export default function ProfileScreen() {
                 );
                 return;
               }
+              trackEvent('account_deleted');
               // Account deleted successfully, user is already signed out
               router.replace('/(auth)/sign-in');
             } catch (error: any) {
@@ -113,6 +131,7 @@ export default function ProfileScreen() {
           text: 'Sign out',
           style: 'destructive',
           onPress: async () => {
+            trackEvent('user_signed_out', { source: 'profile' });
             await signOut();
             router.replace('/(auth)/sign-in');
           },
@@ -312,5 +331,4 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
 

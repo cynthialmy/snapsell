@@ -1,5 +1,5 @@
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useState } from 'react';
 import {
     Alert,
     KeyboardAvoidingView,
@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { signIn, signInWithMagicLink } from '@/utils/auth';
 
 export default function SignInScreen() {
@@ -24,6 +25,12 @@ export default function SignInScreen() {
   const [magicLinkLoading, setMagicLinkLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  useFocusEffect(
+    useCallback(() => {
+      trackScreenView('sign-in', { has_return_to: !!params.returnTo });
+    }, [params.returnTo])
+  );
+
   const handleSignIn = async () => {
     if (!email || !password) {
       setError('Please enter both email and password');
@@ -32,16 +39,22 @@ export default function SignInScreen() {
 
     setLoading(true);
     setError(null);
+    trackEvent('sign_in_attempted', { method: 'email_password' });
 
     const { data, error: signInError } = await signIn(email, password);
 
     if (signInError) {
+      trackEvent('sign_in_failed', {
+        method: 'email_password',
+        error: signInError.message || 'Unknown error',
+      });
       setError(signInError.message || 'Failed to sign in. Please try again.');
       setLoading(false);
       return;
     }
 
     if (data?.user) {
+      trackEvent('sign_in_succeeded', { method: 'email_password' });
       // If we came from listing preview, go back there; otherwise go to tabs
       if (params.returnTo) {
         router.replace(params.returnTo as any);
@@ -59,16 +72,21 @@ export default function SignInScreen() {
 
     setMagicLinkLoading(true);
     setError(null);
+    trackEvent('magic_link_requested', { email_provided: !!email });
 
     const { data, error: magicLinkError } = await signInWithMagicLink(email);
 
     if (magicLinkError) {
+      trackEvent('magic_link_failed', {
+        error: magicLinkError.message || 'Unknown error',
+      });
       setError(magicLinkError.message || 'Failed to send magic link. Please try again.');
       setMagicLinkLoading(false);
       return;
     }
 
     if (data) {
+      trackEvent('magic_link_requested', { success: true });
       Alert.alert(
         'Check your email',
         'We sent you a magic link. Click the link in the email to sign in.',

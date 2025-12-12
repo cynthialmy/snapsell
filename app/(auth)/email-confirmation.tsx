@@ -1,16 +1,23 @@
 import * as Linking from 'expo-linking';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { trackScreenView } from '@/utils/analytics';
 
 export default function EmailConfirmationScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
   const { user } = useAuth();
   const [email, setEmail] = useState<string>('');
+
+  useFocusEffect(
+    useCallback(() => {
+      trackScreenView('email-confirmation');
+    }, [])
+  );
 
   useEffect(() => {
     // Check if we have an email in params

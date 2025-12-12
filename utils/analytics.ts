@@ -120,3 +120,38 @@ export function trackEvent(eventName: string, properties?: Record<string, any>):
 export function getPostHog(): PostHog | null {
     return posthogInstance;
 }
+
+/**
+ * Track a screen view event
+ */
+export function trackScreenView(screenName: string, properties?: Record<string, any>): void {
+    trackEvent('screen_viewed', {
+        screen_name: screenName,
+        ...properties,
+    });
+}
+
+/**
+ * Track a tab switch event
+ */
+export function trackTabSwitch(tabName: string, properties?: Record<string, any>): void {
+    trackEvent('tab_switched', {
+        tab_name: tabName,
+        ...properties,
+    });
+}
+
+/**
+ * Track an error event
+ */
+export function trackError(errorType: string, error: Error | string, context?: Record<string, any>): void {
+    const errorMessage = typeof error === 'string' ? error : error.message;
+    const errorStack = typeof error === 'string' ? undefined : error.stack;
+
+    trackEvent('error_occurred', {
+        error_type: errorType,
+        error_message: errorMessage,
+        error_stack: errorStack,
+        ...context,
+    });
+}

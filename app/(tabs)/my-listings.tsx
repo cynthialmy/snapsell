@@ -2,19 +2,19 @@ import * as Clipboard from 'expo-clipboard';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
-  Image,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Image,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent } from '@/utils/analytics';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { formatListingText } from '@/utils/listingFormatter';
 import { deleteListing as deleteListingApi, getMyListings } from '@/utils/listings-api';
 
@@ -64,6 +64,7 @@ export default function MyListingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      trackScreenView('my-listings', { is_authenticated: !!user });
       // Add a small delay to ensure any pending saves have completed
       // This is especially important for auto-save which has a debounce
       const timer = setTimeout(() => {
@@ -76,8 +77,9 @@ export default function MyListingsScreen() {
 
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
+    trackEvent('listings_refreshed', { is_authenticated: !!user });
     loadListings();
-  }, [loadListings]);
+  }, [loadListings, user]);
 
   const handleDeleteListing = (listing: Listing) => {
     Alert.alert(
@@ -93,6 +95,7 @@ export default function MyListingsScreen() {
             if (error) {
               Alert.alert('Error', 'Failed to delete listing. Please try again.');
             } else {
+              trackEvent('listing_deleted', { listing_id: listing.id });
               loadListings();
             }
           },
@@ -119,6 +122,7 @@ export default function MyListingsScreen() {
 
   const handleListingLongPress = (listing: Listing) => {
     // Navigate to preview/edit screen
+    trackEvent('listing_edited', { listing_id: listing.id, source: 'my-listings' });
     router.push({
       pathname: '/(tabs)/listing-preview',
       params: {
@@ -148,7 +152,10 @@ export default function MyListingsScreen() {
               Create an account to save your listings, access them from anywhere, and never lose your work.
             </Text>
             <Pressable
-              onPress={() => router.push('/(auth)/sign-in')}
+              onPress={() => {
+                trackEvent('sign_in_prompt_shown', { context: 'my-listings' });
+                router.push('/(auth)/sign-in');
+              }}
               style={({ pressed }) => [
                 styles.signInButton,
                 pressed && styles.signInButtonPressed,

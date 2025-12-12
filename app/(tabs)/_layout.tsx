@@ -1,6 +1,8 @@
 import { Tabs } from 'expo-router';
 import { Platform, Text } from 'react-native';
 
+import { trackTabSwitch } from '@/utils/analytics';
+
 export default function TabLayout() {
   return (
     <Tabs
@@ -15,6 +17,20 @@ export default function TabLayout() {
           paddingBottom: Platform.OS === 'ios' ? 20 : 8,
           paddingTop: 8,
           height: Platform.OS === 'ios' ? 88 : 60,
+        },
+      }}
+      screenListeners={{
+        tabPress: (e) => {
+          const routeName = e.target?.split('/').pop() || 'unknown';
+          // Map route names to tab names
+          const tabNameMap: Record<string, string> = {
+            'index': 'home',
+            'my-listings': 'my-listings',
+            'settings': 'settings',
+            'upgrade': 'upgrade',
+          };
+          const tabName = tabNameMap[routeName] || routeName;
+          trackTabSwitch(tabName);
         },
       }}>
       <Tabs.Screen

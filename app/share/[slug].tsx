@@ -1,17 +1,17 @@
-import { useLocalSearchParams } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
-  Image,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Image,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { getListingBySlug } from '@/utils/listings-api';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { formatListingText } from '@/utils/listingFormatter';
+import { getListingBySlug } from '@/utils/listings-api';
 
 interface Listing {
   id: string;
@@ -30,6 +30,14 @@ export default function SharedListingScreen() {
   const [listing, setListing] = useState<Listing | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (params.slug) {
+        trackScreenView('share', { slug: params.slug });
+      }
+    }, [params.slug])
+  );
 
   useEffect(() => {
     if (params.slug) {
@@ -51,6 +59,10 @@ export default function SharedListingScreen() {
 
     if (fetchedListing) {
       setListing(fetchedListing);
+      trackEvent('share_link_viewed', {
+        slug,
+        listing_id: fetchedListing.id,
+      });
     } else {
       setError('Listing not found');
     }

@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
     Alert,
     Pressable,
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { signOut } from '@/utils/auth';
 import { checkQuota } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
@@ -38,6 +39,13 @@ export default function SettingsScreen() {
   const [pickupNotes, setPickupNotes] = useState('');
   const [showCurrencyDropdown, setShowCurrencyDropdown] = useState(false);
 
+  // Track previous values for change tracking
+  const prevLocationRef = useRef<string>('');
+  const prevCurrencyRef = useRef<string>('$');
+  const prevPickupAvailableRef = useRef<boolean>(false);
+  const prevShippingAvailableRef = useRef<boolean>(false);
+  const prevPickupNotesRef = useRef<string>('');
+
   useEffect(() => {
     loadUserPreferences();
   }, [user]);
@@ -45,18 +53,32 @@ export default function SettingsScreen() {
   // Reload quota when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      trackScreenView('settings', { is_authenticated: !!user });
       loadQuota();
-    }, [loadQuota])
+    }, [loadQuota, user])
   );
 
   const loadUserPreferences = async () => {
     const prefs = await loadPreferences();
     if (prefs) {
-      setLocation(prefs.location || '');
-      setCurrency(prefs.currency || '$');
-      setPickupAvailable(prefs.pickupAvailable ?? false);
-      setShippingAvailable(prefs.shippingAvailable ?? false);
-      setPickupNotes(prefs.pickupNotes || '');
+      const loadedLocation = prefs.location || '';
+      const loadedCurrency = prefs.currency || '$';
+      const loadedPickupAvailable = prefs.pickupAvailable ?? false;
+      const loadedShippingAvailable = prefs.shippingAvailable ?? false;
+      const loadedPickupNotes = prefs.pickupNotes || '';
+
+      setLocation(loadedLocation);
+      setCurrency(loadedCurrency);
+      setPickupAvailable(loadedPickupAvailable);
+      setShippingAvailable(loadedShippingAvailable);
+      setPickupNotes(loadedPickupNotes);
+
+      // Initialize refs with loaded values
+      prevLocationRef.current = loadedLocation;
+      prevCurrencyRef.current = loadedCurrency;
+      prevPickupAvailableRef.current = loadedPickupAvailable;
+      prevShippingAvailableRef.current = loadedShippingAvailable;
+      prevPickupNotesRef.current = loadedPickupNotes;
     }
   };
 
@@ -94,6 +116,66 @@ export default function SettingsScreen() {
   };
 
   useEffect(() => {
+    // Track location changes
+    if (location !== prevLocationRef.current) {
+      trackEvent('setting_changed', {
+        setting_name: 'location',
+        old_value: prevLocationRef.current,
+        new_value: location,
+      });
+      prevLocationRef.current = location;
+    }
+  }, [location]);
+
+  useEffect(() => {
+    // Track currency changes
+    if (currency !== prevCurrencyRef.current) {
+      trackEvent('setting_changed', {
+        setting_name: 'currency',
+        old_value: prevCurrencyRef.current,
+        new_value: currency,
+      });
+      prevCurrencyRef.current = currency;
+    }
+  }, [currency]);
+
+  useEffect(() => {
+    // Track pickup available changes
+    if (pickupAvailable !== prevPickupAvailableRef.current) {
+      trackEvent('setting_changed', {
+        setting_name: 'pickup_available',
+        old_value: prevPickupAvailableRef.current,
+        new_value: pickupAvailable,
+      });
+      prevPickupAvailableRef.current = pickupAvailable;
+    }
+  }, [pickupAvailable]);
+
+  useEffect(() => {
+    // Track shipping available changes
+    if (shippingAvailable !== prevShippingAvailableRef.current) {
+      trackEvent('setting_changed', {
+        setting_name: 'shipping_available',
+        old_value: prevShippingAvailableRef.current,
+        new_value: shippingAvailable,
+      });
+      prevShippingAvailableRef.current = shippingAvailable;
+    }
+  }, [shippingAvailable]);
+
+  useEffect(() => {
+    // Track pickup notes changes
+    if (pickupNotes !== prevPickupNotesRef.current) {
+      trackEvent('setting_changed', {
+        setting_name: 'pickup_notes',
+        old_value: prevPickupNotesRef.current,
+        new_value: pickupNotes,
+      });
+      prevPickupNotesRef.current = pickupNotes;
+    }
+  }, [pickupNotes]);
+
+  useEffect(() => {
     // Debounce save
     const timer = setTimeout(() => {
       saveUserPreferences();
@@ -111,6 +193,7 @@ export default function SettingsScreen() {
           text: 'Sign out',
           style: 'destructive',
           onPress: async () => {
+            trackEvent('user_signed_out', { source: 'settings' });
             await signOut();
             router.replace('/(auth)/sign-in');
           },
@@ -140,7 +223,10 @@ export default function SettingsScreen() {
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>Account</Text>
             <Pressable
-              onPress={() => router.push('/profile')}
+              onPress={() => {
+                trackEvent('profile_viewed', { source: 'settings' });
+                router.push('/profile');
+              }}
               style={styles.sectionButton}>
               <Text style={styles.sectionButtonText}>Profile</Text>
               <Text style={styles.sectionButtonArrow}>→</Text>

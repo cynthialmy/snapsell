@@ -1,8 +1,8 @@
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
 import * as Location from 'expo-location';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { type ReactNode, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
     Alert,
     KeyboardAvoidingView,
@@ -23,7 +23,7 @@ import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { QuotaModal } from '@/components/QuotaModal';
 import { SaveSlotsPaywall } from '@/components/SaveSlotsPaywall';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent } from '@/utils/analytics';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import type { ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing, updateListing } from '@/utils/listings';
@@ -159,6 +159,99 @@ export default function ListingPreviewScreen() {
       }),
     [title, price, description, condition, location, pickupAvailable, shippingAvailable, pickupNotes, currency],
   );
+
+  // Track screen view
+  useFocusEffect(
+    useCallback(() => {
+      trackScreenView('listing-preview', {
+        has_backend_id: !!backendListingId,
+        has_payload: !!payload,
+        has_listing_id: !!params.listingId,
+      });
+    }, [backendListingId, payload, params.listingId])
+  );
+
+  // Track field-level edits
+  useEffect(() => {
+    if (title !== prevTitleRef.current && prevTitleRef.current !== '') {
+      trackEvent('listing_field_edited', {
+        field_name: 'title',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [title, backendListingId]);
+
+  useEffect(() => {
+    if (price !== prevPriceRef.current && prevPriceRef.current !== '') {
+      trackEvent('listing_field_edited', {
+        field_name: 'price',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [price, backendListingId]);
+
+  useEffect(() => {
+    if (description !== prevDescriptionRef.current && prevDescriptionRef.current !== '') {
+      trackEvent('listing_field_edited', {
+        field_name: 'description',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [description, backendListingId]);
+
+  useEffect(() => {
+    if (condition !== prevConditionRef.current && prevConditionRef.current !== '') {
+      trackEvent('listing_field_edited', {
+        field_name: 'condition',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [condition, backendListingId]);
+
+  useEffect(() => {
+    if (location !== prevLocationRef.current && prevLocationRef.current !== '') {
+      trackEvent('listing_field_edited', {
+        field_name: 'location',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [location, backendListingId]);
+
+  useEffect(() => {
+    if (currency !== prevCurrencyRef.current && prevCurrencyRef.current !== '') {
+      trackEvent('listing_field_edited', {
+        field_name: 'currency',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [currency, backendListingId]);
+
+  useEffect(() => {
+    if (pickupAvailable !== prevPickupAvailableRef.current && prevPickupAvailableRef.current !== false) {
+      trackEvent('listing_field_edited', {
+        field_name: 'pickup_available',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [pickupAvailable, backendListingId]);
+
+  useEffect(() => {
+    if (shippingAvailable !== prevShippingAvailableRef.current && prevShippingAvailableRef.current !== false) {
+      trackEvent('listing_field_edited', {
+        field_name: 'shipping_available',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [shippingAvailable, backendListingId]);
+
+  useEffect(() => {
+    if (pickupNotes !== prevPickupNotesRef.current && prevPickupNotesRef.current !== '') {
+      trackEvent('listing_field_edited', {
+        field_name: 'pickup_notes',
+        has_backend_id: !!backendListingId,
+      });
+    }
+  }, [pickupNotes, backendListingId]);
 
   // Load listing from backend if listingId is provided but no payload
   useEffect(() => {
@@ -1049,6 +1142,7 @@ export default function ListingPreviewScreen() {
     }
 
     setIsLocating(true);
+    trackEvent('location_button_pressed');
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {

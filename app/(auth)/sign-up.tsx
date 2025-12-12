@@ -1,5 +1,5 @@
-import { useRouter } from 'expo-router';
-import { useEffect, useState } from 'react';
+import { useFocusEffect, useRouter } from 'expo-router';
+import { useCallback, useEffect, useState } from 'react';
 import {
     Alert,
     KeyboardAvoidingView,
@@ -14,6 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { signUp } from '@/utils/auth';
 
 export default function SignUpScreen() {
@@ -24,6 +25,12 @@ export default function SignUpScreen() {
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useFocusEffect(
+    useCallback(() => {
+      trackScreenView('sign-up');
+    }, [])
+  );
 
   // Reset loading state when user becomes authenticated (e.g., after email confirmation)
   useEffect(() => {
@@ -45,10 +52,14 @@ export default function SignUpScreen() {
 
     setLoading(true);
     setError(null);
+    trackEvent('sign_up_attempted', { has_display_name: !!displayName });
 
     const { data, error: signUpError } = await signUp(email, password, displayName || undefined);
 
     if (signUpError) {
+      trackEvent('sign_up_failed', {
+        error: signUpError.message || 'Unknown error',
+      });
       setError(signUpError.message || 'Failed to sign up. Please try again.');
       setLoading(false);
       return;
@@ -58,6 +69,7 @@ export default function SignUpScreen() {
       // Check if email confirmation is required
       // If session is null but user exists, email confirmation is needed
       if (!data.session) {
+        trackEvent('sign_up_succeeded', { email_confirmation_required: true });
         // Reset loading state before navigating
         setLoading(false);
         // Navigate to email confirmation screen
@@ -66,6 +78,7 @@ export default function SignUpScreen() {
           params: { email },
         });
       } else {
+        trackEvent('sign_up_succeeded', { email_confirmation_required: false });
         // Email confirmation not required, user is already signed in
         setLoading(false);
         Alert.alert(

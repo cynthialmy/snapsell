@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import { trackError } from './analytics';
 import { supabase } from './auth';
 
 export type ListingData = {
@@ -316,6 +317,14 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
         const error = new Error(errorMessage);
         lastError = error;
 
+        // Track API error
+        trackError('api_error', error, {
+          endpoint: endpointUrl,
+          status_code: response.status,
+          attempt,
+          max_attempts: maxAttempts,
+        });
+
         // Check if this error is retryable
         if (isRetryableError(error, response) && attempt < maxAttempts) {
           // Wait before retrying (1 second delay)
@@ -368,6 +377,11 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
         finalErrorMessage.toLowerCase().includes('connection');
 
       if (isNetworkError) {
+        trackError('network_error', lastError, {
+          endpoint: endpointUrl,
+          attempt,
+          max_attempts: maxAttempts,
+        });
         const isLocalhost = API_URL.includes('localhost') || API_URL.includes('127.0.0.1');
         if (Platform.OS !== 'web' && isLocalhost) {
           throw new Error(
@@ -378,6 +392,12 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Listing
           "Snappy can't reach the server right now. Check your internet connection and try again."
         );
       }
+      // Track other errors
+      trackError('api_error', lastError, {
+        endpoint: endpointUrl,
+        attempt,
+        max_attempts: maxAttempts,
+      });
       throw lastError;
     }
   }

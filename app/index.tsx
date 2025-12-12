@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent } from '@/utils/analytics';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
@@ -82,9 +82,23 @@ export default function HomeScreen() {
       // Check quota if user is authenticated
       if (user) {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
+        trackEvent('quota_checked', {
+          has_quota: !!currentQuota,
+          quota_used: currentQuota?.used,
+          quota_limit: currentQuota?.limit,
+          quota_remaining: currentQuota?.remaining,
+        });
         // Silently handle quota errors (backend might not be set up yet)
         if (!quotaError && currentQuota && currentQuota.remaining === 0) {
           // Quota exceeded
+          trackEvent('quota_exceeded', {
+            quota_limit: currentQuota.limit,
+            quota_used: currentQuota.used,
+          });
+          trackEvent('upgrade_prompt_shown', {
+            context: 'quota_exceeded',
+            quota_limit: currentQuota.limit,
+          });
           Alert.alert(
             'Quota Exceeded',
             `You've used all ${currentQuota.limit} of your listings. Upgrade to create more listings.`,
@@ -394,8 +408,9 @@ export default function HomeScreen() {
 
   useFocusEffect(
     useCallback(() => {
+      trackScreenView('home', { is_authenticated: !!user });
       loadQuota();
-    }, [loadQuota]),
+    }, [loadQuota, user]),
   );
 
   const sampleListingText = useMemo(

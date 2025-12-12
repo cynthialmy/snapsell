@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
+import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { checkQuota } from '@/utils/listings-api';
 import { getPaymentHistory, initiateCreditPurchase, initiateProSubscription, type PaymentHistoryItem } from '@/utils/payments';
 
@@ -62,6 +63,7 @@ export default function UpgradeScreen() {
         console.error('Error loading payment history:', error);
       } else {
         setPaymentHistory(payments);
+        trackEvent('payment_history_viewed', { payment_count: payments?.length || 0 });
       }
     } catch (error) {
       console.error('Error loading payment history:', error);
@@ -73,11 +75,12 @@ export default function UpgradeScreen() {
   // Reload quota and payment history when screen comes into focus
   useFocusEffect(
     useCallback(() => {
+      trackScreenView('upgrade', { is_authenticated: !!user });
       loadQuota();
       loadPaymentHistory();
       // Note: refreshUser() is called automatically after payments in _layout.tsx
       // No need to refresh on every focus - credits only change after payments
-    }, [loadQuota, loadPaymentHistory])
+    }, [loadQuota, loadPaymentHistory, user])
   );
 
   const handlePurchaseCredits = async (credits: 10 | 25 | 60) => {
@@ -98,6 +101,13 @@ export default function UpgradeScreen() {
 
     setProcessing(true);
     try {
+      // Track purchase initiation
+      trackEvent('purchase_initiated', {
+        product_type: 'credits',
+        product_id: credits.toString(),
+        amount: credits, // This would be the actual price in production
+      });
+
       // Use deep links directly for Stripe redirects
       // Note: Browser redirects can't include auth headers, so we use deep links
       // The webhook processes payment automatically; deep link is for UX
@@ -123,6 +133,11 @@ export default function UpgradeScreen() {
         Alert.alert('Error', 'Cannot open payment URL');
       }
     } catch (error: any) {
+      trackEvent('purchase_failed', {
+        product_type: 'credits',
+        product_id: credits.toString(),
+        error: error.message || 'Unknown error',
+      });
       Alert.alert('Error', error.message || 'Failed to start payment. Please try again.');
     } finally {
       setProcessing(false);
@@ -147,6 +162,13 @@ export default function UpgradeScreen() {
 
     setProcessing(true);
     try {
+      // Track subscription initiation
+      trackEvent('purchase_initiated', {
+        product_type: 'subscription',
+        product_id: plan,
+        amount: plan === 'monthly' ? 'monthly' : 'yearly', // This would be the actual price in production
+      });
+
       // Use deep links directly for Stripe redirects
       // Note: Browser redirects can't include auth headers, so we use deep links
       // The webhook processes payment automatically; deep link is for UX
@@ -171,6 +193,11 @@ export default function UpgradeScreen() {
         Alert.alert('Error', 'Cannot open payment URL');
       }
     } catch (error: any) {
+      trackEvent('purchase_failed', {
+        product_type: 'subscription',
+        product_id: plan,
+        error: error.message || 'Unknown error',
+      });
       Alert.alert('Error', error.message || 'Failed to start subscription. Please try again.');
     } finally {
       setProcessing(false);

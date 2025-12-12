@@ -8,6 +8,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
+import { trackError } from './analytics';
 import { supabase } from './auth';
 import { clearListings, loadListings } from './listings';
 
@@ -120,7 +121,12 @@ export async function uploadImage(base64Image: string, contentType: string = 'im
       }
 
       console.error('[Upload] Parsed error data:', errorData);
-      throw new Error(errorData.error || `Upload failed with status ${response.status}`);
+      const error = new Error(errorData.error || `Upload failed with status ${response.status}`);
+      trackError('api_error', error, {
+        endpoint: 'upload',
+        status_code: response.status,
+      });
+      throw error;
     }
 
     const responseText = await response.text();
@@ -131,7 +137,12 @@ export async function uploadImage(base64Image: string, contentType: string = 'im
       data = JSON.parse(responseText);
     } catch (parseError) {
       console.error('[Upload] Failed to parse response as JSON:', parseError);
-      throw new Error('Invalid response from server');
+      const error = new Error('Invalid response from server');
+      trackError('api_error', error, {
+        endpoint: 'upload',
+        error_type: 'parse_error',
+      });
+      throw error;
     }
 
     console.log('[Upload] Upload successful, storage_path:', data.storage_path);
@@ -140,7 +151,11 @@ export async function uploadImage(base64Image: string, contentType: string = 'im
     console.error('[Upload] Upload error:', error);
     console.error('[Upload] Error message:', error?.message);
     console.error('[Upload] Error stack:', error?.stack);
-    return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
+    const err = error instanceof Error ? error : new Error(String(error));
+    trackError('api_error', err, {
+      endpoint: 'upload',
+    });
+    return { data: null, error: err };
   }
 }
 

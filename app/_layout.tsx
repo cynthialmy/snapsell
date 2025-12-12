@@ -11,7 +11,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { AnimatedSplash } from '@/components/animated-splash';
 import { AuthProvider, useAuth } from '@/contexts/AuthContext';
 import { useColorScheme } from '@/hooks/use-color-scheme';
-import { initializePostHog } from '@/utils/analytics';
+import { initializePostHog, trackEvent } from '@/utils/analytics';
 import { parsePaymentCallback, verifyPaymentStatus } from '@/utils/payments';
 
 // Prevent the native splash screen from auto-hiding
@@ -195,6 +195,7 @@ function RootLayoutNav() {
         const callback = parsePaymentCallback(event.url);
 
         if (path === 'payment/cancel') {
+          trackEvent('purchase_cancelled', { source: 'payment_callback' });
           Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
           router.push('/(tabs)/upgrade');
           return;
@@ -215,6 +216,10 @@ function RootLayoutNav() {
               // Try to verify payment status
               try {
                 const result = await verifyPaymentStatus(sessionId);
+                trackEvent('purchase_completed', {
+                  session_id: sessionId,
+                  credits: result.user.credits,
+                });
                 Alert.alert(
                   'Payment Successful',
                   `You now have ${result.user.credits} credits!`
@@ -222,6 +227,10 @@ function RootLayoutNav() {
               } catch (verifyError) {
                 // Verification failed, but webhook might have processed it
                 // Just show a generic success message
+                trackEvent('purchase_completed', {
+                  session_id: sessionId,
+                  verified: false,
+                });
                 Alert.alert(
                   'Payment Successful',
                   'Your payment has been processed. Your credits will be updated shortly.'
@@ -229,6 +238,11 @@ function RootLayoutNav() {
               }
             } catch (error: any) {
               console.error('Error refreshing user after payment:', error);
+              trackEvent('purchase_failed', {
+                session_id: sessionId,
+                error: error.message || 'Unknown error',
+                stage: 'post_payment_refresh',
+              });
               Alert.alert(
                 'Payment Received',
                 'Your payment is being processed. Please check your account in a moment.'
@@ -236,6 +250,10 @@ function RootLayoutNav() {
             }
           }, 3000);
         } else if (callback.status === 'failed' || callback.status === 'cancelled') {
+          trackEvent('purchase_failed', {
+            status: callback.status,
+            error: 'Payment cancelled or failed',
+          });
           Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
           router.push('/(tabs)/upgrade');
         }
@@ -262,6 +280,7 @@ function RootLayoutNav() {
           const callback = parsePaymentCallback(url);
 
           if (path === 'payment/cancel' || url.includes('/payment/cancel') || callback.status === 'cancelled') {
+            trackEvent('purchase_cancelled', { source: 'cold_start_callback' });
             Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
             router.push('/(tabs)/upgrade');
             return;
@@ -282,6 +301,11 @@ function RootLayoutNav() {
                 // Try to verify payment status
                 try {
                   const result = await verifyPaymentStatus(sessionId);
+                  trackEvent('purchase_completed', {
+                    session_id: sessionId,
+                    credits: result.user.credits,
+                    source: 'cold_start',
+                  });
                   Alert.alert(
                     'Payment Successful',
                     `You now have ${result.user.credits} Save Slots!`
@@ -289,6 +313,11 @@ function RootLayoutNav() {
                 } catch (verifyError) {
                   // Verification failed, but webhook might have processed it
                   // Just show a generic success message
+                  trackEvent('purchase_completed', {
+                    session_id: sessionId,
+                    verified: false,
+                    source: 'cold_start',
+                  });
                   Alert.alert(
                     'Payment Successful',
                     'Your payment has been processed. Your Save Slots will be updated shortly.'
@@ -296,6 +325,12 @@ function RootLayoutNav() {
                 }
               } catch (error: any) {
                 console.error('Error refreshing user after payment:', error);
+                trackEvent('purchase_failed', {
+                  session_id: sessionId,
+                  error: error.message || 'Unknown error',
+                  stage: 'post_payment_refresh',
+                  source: 'cold_start',
+                });
                 Alert.alert(
                   'Payment Received',
                   'Your payment is being processed. Please check your account in a moment.'
@@ -303,6 +338,11 @@ function RootLayoutNav() {
               }
             }, 3000);
           } else if (callback.status === 'failed') {
+            trackEvent('purchase_failed', {
+              status: callback.status,
+              error: 'Payment failed',
+              source: 'cold_start',
+            });
             Alert.alert('Payment Failed', 'Your payment could not be processed. Please try again.');
             router.push('/(tabs)/upgrade');
           }
