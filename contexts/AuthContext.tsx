@@ -4,7 +4,7 @@
  * Provides global authentication state management.
  */
 
-import { getUser, onAuthStateChange, type User } from '@/utils/auth';
+import { getUser, getUserProfile, onAuthStateChange, type User } from '@/utils/auth';
 import { migrateLocalListingsToBackend } from '@/utils/listings-api';
 import { createContext, ReactNode, useContext, useEffect, useState } from 'react';
 
@@ -25,7 +25,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { user: currentUser, error } = await getUser();
       // Only set user if we got one, or if error is just "no session" (which is normal)
       if (currentUser) {
-        setUser(currentUser);
+        // Also fetch user profile to get credits and other profile data
+        try {
+          const { profile, error: profileError } = await getUserProfile();
+          if (profile && !profileError) {
+            // Merge profile data (credits, plan, etc.) into user object
+            const userWithProfile = {
+              ...currentUser,
+              credits: profile.credits,
+              plan: profile.plan,
+              display_name: profile.display_name,
+              avatar_url: profile.avatar_url,
+            } as User & { credits?: number; plan?: string };
+
+            setUser(userWithProfile);
+          } else {
+            // If profile fetch fails, still set auth user (profile might not exist yet)
+            if (__DEV__) {
+              console.warn('Profile fetch failed or not found:', profileError);
+            }
+            setUser(currentUser);
+          }
+        } catch (profileError) {
+          // Profile fetch failed, but still set auth user
+          console.warn('Failed to fetch user profile:', profileError);
+          setUser(currentUser);
+        }
       } else {
         setUser(null);
       }
@@ -46,11 +71,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     // Listen to auth state changes
     const { data: { subscription } } = onAuthStateChange(async (user) => {
-      setUser(user);
-      setLoading(false);
-
-      // Migrate local listings to backend when user signs in
       if (user) {
+        // Fetch user profile to get credits and other profile data
+        try {
+          const { profile, error: profileError } = await getUserProfile();
+          if (profile && !profileError) {
+            // Merge profile data (credits, plan, etc.) into user object
+            setUser({
+              ...user,
+              credits: profile.credits,
+              plan: profile.plan,
+              display_name: profile.display_name,
+              avatar_url: profile.avatar_url,
+            } as User & { credits?: number; plan?: string });
+          } else {
+            // If profile fetch fails, still set auth user (profile might not exist yet)
+            setUser(user);
+          }
+        } catch (profileError) {
+          // Profile fetch failed, but still set auth user
+          console.warn('Failed to fetch user profile:', profileError);
+          setUser(user);
+        }
+
+        // Migrate local listings to backend when user signs in
         // Run migration in background (don't block UI)
         migrateLocalListingsToBackend().then((result) => {
           if (result.error && !result.skipped) {
@@ -61,7 +105,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }).catch((error) => {
           console.error('Migration error:', error);
         });
+      } else {
+        setUser(null);
       }
+      setLoading(false);
     });
 
     return () => {

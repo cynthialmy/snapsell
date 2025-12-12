@@ -19,7 +19,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { LoginGateModal } from '@/components/LoginGateModal';
+import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { QuotaModal } from '@/components/QuotaModal';
+import { SaveSlotsPaywall } from '@/components/SaveSlotsPaywall';
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent } from '@/utils/analytics';
 import type { ListingData } from '@/utils/api';
@@ -64,6 +66,13 @@ export default function ListingPreviewScreen() {
   // Quota modal state
   const [showQuotaModal, setShowQuotaModal] = useState(false);
   const [quotaCount, setQuotaCount] = useState(0);
+
+  // Save Slots state
+  const [quota, setQuota] = useState<{ used: number; limit: number; remaining: number } | null>(null);
+  const [quotaLoading, setQuotaLoading] = useState(false);
+  const [showPaywall, setShowPaywall] = useState(false);
+  const [showLowSlotsWarning, setShowLowSlotsWarning] = useState(false);
+  const [showSaveSuccessToast, setShowSaveSuccessToast] = useState(false);
 
   // Auto-save checkbox state
   const [autoSaveListing, setAutoSaveListing] = useState(false);
@@ -305,6 +314,35 @@ export default function ListingPreviewScreen() {
       prevConditionRef.current = newCondition;
     }
   }, [listing]);
+
+  // Load quota on mount and when user changes
+  useEffect(() => {
+    const loadQuotaData = async () => {
+      if (!user) {
+        setQuota(null);
+        setQuotaLoading(false);
+        return;
+      }
+
+      setQuotaLoading(true);
+      try {
+        const { quota: userQuota, error } = await checkQuota();
+        if (error) {
+          // Silently handle errors (backend might not be configured)
+          setQuota(null);
+        } else {
+          setQuota(userQuota);
+        }
+      } catch (error) {
+        console.warn('[Listing Preview] Failed to load quota:', error);
+        setQuota(null);
+      } finally {
+        setQuotaLoading(false);
+      }
+    };
+
+    loadQuotaData();
+  }, [user]);
 
   // Load saved preferences on mount and when listing changes
   // This ensures preferences (location, pickup, shipping, currency) persist across new listings
@@ -897,16 +935,22 @@ export default function ListingPreviewScreen() {
           if (createError) {
             console.error('[Listing Save] Backend error:', createError);
 
-            // Handle quota exceeded
+            // Handle quota exceeded - show friendly paywall
             if (createError.code === 'QUOTA_EXCEEDED') {
-              Alert.alert(
-                'Quota Exceeded',
-                'You\'ve reached your listing limit. Upgrade to create more listings.',
-                [
-                  { text: 'Cancel', style: 'cancel' },
-                  { text: 'Upgrade', onPress: () => router.push('/(tabs)/upgrade') },
-                ]
-              );
+              // Refresh quota to get current limit
+              try {
+                const { quota: currentQuota } = await checkQuota();
+                if (currentQuota) {
+                  setQuota(currentQuota);
+                  setShowPaywall(true);
+                } else {
+                  // Fallback to upgrade screen if quota check fails
+                  router.push('/(tabs)/upgrade');
+                }
+              } catch (error) {
+                // Fallback to upgrade screen
+                router.push('/(tabs)/upgrade');
+              }
             } else {
               const errorMessage = createError.message || 'Unknown error';
               console.warn('[Listing Save] Failed to save listing to backend, saving locally instead:', createError);
@@ -923,14 +967,30 @@ export default function ListingPreviewScreen() {
             savedListingId = backendListing.id;
             setBackendListingId(backendListing.id);
 
-            // Check quota and show modal if needed
+            // Refresh quota after save
             try {
-              const { quota } = await checkQuota();
-              if (quota && user?.id) {
-                const shouldShow = await checkQuotaModalShouldShow(user.id, quota.used);
-                if (shouldShow) {
-                  setQuotaCount(quota.used);
-                  setShowQuotaModal(true);
+              const { quota: updatedQuota } = await checkQuota();
+              if (updatedQuota) {
+                setQuota(updatedQuota);
+
+                // Show progress toast
+                setShowSaveSuccessToast(true);
+                setTimeout(() => {
+                  setShowSaveSuccessToast(false);
+                }, 4000);
+
+                // Show low slots warning if at 2 slots left
+                if (updatedQuota.remaining === 2) {
+                  setShowLowSlotsWarning(true);
+                }
+
+                // Check quota modal if needed
+                if (user?.id) {
+                  const shouldShow = await checkQuotaModalShouldShow(user.id, updatedQuota.used);
+                  if (shouldShow) {
+                    setQuotaCount(updatedQuota.used);
+                    setShowQuotaModal(true);
+                  }
                 }
               }
             } catch (quotaError) {
@@ -1308,7 +1368,14 @@ export default function ListingPreviewScreen() {
           {!backendListingId && (
             <View style={styles.autoSaveSection}>
               <View style={styles.toggleRow}>
-                <Text style={styles.toggleLabel}>Save this listing for future</Text>
+                <View style={styles.toggleLabelContainer}>
+                  <Text style={styles.toggleLabel}>
+                    Save this listing for future
+                    {user && quota && !quotaLoading && (
+                      <Text style={styles.slotsCount}> ({quota.remaining} Save Slots left)</Text>
+                    )}
+                  </Text>
+                </View>
                 <Switch
                   value={autoSaveListing}
                   onValueChange={handleAutoSaveToggle}
@@ -1318,6 +1385,11 @@ export default function ListingPreviewScreen() {
               {!user && (
                 <Text style={styles.autoSaveHint}>
                   Sign in to save your listings
+                </Text>
+              )}
+              {user && (
+                <Text style={styles.autoSaveHint}>
+                  *Copy is always free.
                 </Text>
               )}
             </View>
@@ -1371,6 +1443,43 @@ export default function ListingPreviewScreen() {
           setShowQuotaModal(false);
         }}
       />
+
+      <SaveSlotsPaywall
+        visible={showPaywall}
+        limit={quota?.limit || 10}
+        onBuySlots={() => {
+          setShowPaywall(false);
+          router.push('/(tabs)/upgrade');
+        }}
+        onGoUnlimited={() => {
+          setShowPaywall(false);
+          router.push('/(tabs)/upgrade');
+        }}
+        onDismiss={() => {
+          setShowPaywall(false);
+        }}
+      />
+
+      <LowSlotsWarning
+        visible={showLowSlotsWarning}
+        remaining={quota?.remaining || 0}
+        onDismiss={() => {
+          setShowLowSlotsWarning(false);
+        }}
+        onUpgrade={() => {
+          setShowLowSlotsWarning(false);
+          router.push('/(tabs)/upgrade');
+        }}
+      />
+
+      {/* Save Success Toast */}
+      {showSaveSuccessToast && quota && (
+        <View style={styles.saveSuccessToast}>
+          <Text style={styles.saveSuccessToastText}>
+            Saved! 🎉 You have {quota.remaining} Save Slot{quota.remaining !== 1 ? 's' : ''} left.
+          </Text>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -1728,5 +1837,37 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 16,
     color: '#64748B',
+  },
+  toggleLabelContainer: {
+    flex: 1,
+    marginRight: 12,
+  },
+  slotsCount: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#4338CA',
+  },
+  saveSuccessToast: {
+    position: 'absolute',
+    bottom: 100,
+    left: 16,
+    right: 16,
+    backgroundColor: '#F0FDF4',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#BBF7D0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 8,
+    elevation: 4,
+    zIndex: 1000,
+  },
+  saveSuccessToastText: {
+    fontSize: 14,
+    color: '#166534',
+    fontWeight: '600',
+    textAlign: 'center',
   },
 });

@@ -3,15 +3,51 @@
  *
  * This file provides functions for Stripe Checkout payment integration.
  * Payments are processed through Stripe Checkout, which can be configured to work with Ko-fi.
+ *
+ * ## Redirect URL Notes:
+ *
+ * **Custom Scheme URLs (snapsell://):**
+ * - May not work reliably in all browsers when Stripe redirects
+ * - Browsers may show an error or fail to open the app
+ * - The webhook still processes payments automatically, so this is mainly a UX issue
+ *
+ * **Recommended Approaches:**
+ * 1. **Universal Links (iOS) / App Links (Android)** - Best UX, works in browsers
+ *    - Configure in app.json/app.config.js
+ *    - Use HTTPS URLs that redirect to your app
+ *    - Example: `https://yourapp.com/payment/success?session_id={CHECKOUT_SESSION_ID}`
+ *
+ * 2. **Web Redirect Page** - Simple fallback
+ *    - Create a simple HTML page that redirects to deep link
+ *    - Example: `https://yourapp.com/payment/success` → redirects to `snapsell://payment/success`
+ *
+ * 3. **Default Deep Links** - Works if user manually returns to app
+ *    - Backend will use default deep links if URLs not provided
+ *    - Payment still processes via webhook
  */
 
 import { supabase } from './auth';
 
 // Get Edge Function base URL
-const EDGE_FUNCTION_BASE = process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL ||
-  (process.env.EXPO_PUBLIC_SUPABASE_URL
-    ? `${process.env.EXPO_PUBLIC_SUPABASE_URL}/functions/v1`
-    : null);
+function getEdgeFunctionBase(): string | null {
+  const functionsUrl = process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL;
+  const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+
+  if (functionsUrl) {
+    // Remove trailing slash if present
+    return functionsUrl.replace(/\/$/, '');
+  }
+
+  if (supabaseUrl) {
+    // Remove trailing slash if present, then add /functions/v1
+    const baseUrl = supabaseUrl.replace(/\/$/, '');
+    return `${baseUrl}/functions/v1`;
+  }
+
+  return null;
+}
+
+const EDGE_FUNCTION_BASE = getEdgeFunctionBase();
 
 if (!EDGE_FUNCTION_BASE) {
   console.warn(
@@ -41,12 +77,42 @@ interface PaymentVerificationResponse {
 }
 
 /**
+ * Options for checkout session creation
+ */
+interface CheckoutOptions {
+  /** Custom success URL (defaults to deep link: snapsell://payment/success) */
+  successUrl?: string;
+  /** Custom cancel URL (defaults to deep link: snapsell://payment/cancel) */
+  cancelUrl?: string;
+}
+
+/**
  * Create checkout session for credit purchase
  * @param credits - Number of credits to purchase (10, 25, or 60)
+ * @param options - Optional configuration including success_url and cancel_url
  * @returns Checkout URL to redirect user to Stripe Checkout
+ *
+ * @example
+ * // Use default deep links
+ * const url = await initiateCreditPurchase(10);
+ *
+ * @example
+ * // Use custom URLs (recommended: Universal Links/App Links)
+ * const url = await initiateCreditPurchase(10, {
+ *   successUrl: 'https://yourapp.com/payment/success?session_id={CHECKOUT_SESSION_ID}',
+ *   cancelUrl: 'https://yourapp.com/payment/cancel',
+ * });
+ *
+ * @example
+ * // Use deep links explicitly
+ * const url = await initiateCreditPurchase(10, {
+ *   successUrl: 'snapsell://payment/success?session_id={CHECKOUT_SESSION_ID}',
+ *   cancelUrl: 'snapsell://payment/cancel',
+ * });
  */
 export async function initiateCreditPurchase(
-  credits: 10 | 25 | 60
+  credits: 10 | 25 | 60,
+  options?: CheckoutOptions
 ): Promise<string> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -58,22 +124,60 @@ export async function initiateCreditPurchase(
       throw new Error('Supabase Edge Functions URL not configured');
     }
 
+    // Get deep link scheme for default redirect URLs
+    const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
+    const defaultSuccessUrl = `${deepLinkScheme}://payment/success?session_id={CHECKOUT_SESSION_ID}`;
+    const defaultCancelUrl = `${deepLinkScheme}://payment/cancel`;
+
+    const requestBody: any = {
+      type: 'credits',
+      credits: credits,
+      user_id: session.user.id,
+    };
+
+    // Only include URLs if provided (backend will use defaults if not provided)
+    if (options?.successUrl) {
+      requestBody.success_url = options.successUrl;
+    }
+    if (options?.cancelUrl) {
+      requestBody.cancel_url = options.cancelUrl;
+    }
+
     const response = await fetch(`${EDGE_FUNCTION_BASE}/create-checkout-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({
-        type: 'credits',
-        credits: credits,
-        user_id: session.user.id,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to create checkout session' }));
-      throw new Error(error.error || 'Failed to create checkout session');
+      // Try to get error details from response
+      let errorMessage = 'Failed to create checkout session';
+      let errorDetails: any = null;
+
+      try {
+        const errorText = await response.text();
+        try {
+          errorDetails = JSON.parse(errorText);
+          errorMessage = errorDetails.error || errorDetails.message || errorMessage;
+        } catch {
+          // Response is not JSON, might be HTML or plain text
+          errorMessage = `Backend error (${response.status} ${response.statusText}): ${errorText.substring(0, 200)}`;
+        }
+      } catch (e) {
+        errorMessage = `Backend error: ${response.status} ${response.statusText}`;
+      }
+
+      console.error('Checkout session creation failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorDetails,
+        url: `${EDGE_FUNCTION_BASE}/create-checkout-session`,
+      });
+
+      throw new Error(errorMessage);
     }
 
     const data: CheckoutSessionResponse = await response.json();
@@ -87,10 +191,30 @@ export async function initiateCreditPurchase(
 /**
  * Create checkout session for Pro subscription
  * @param plan - Subscription plan type ('monthly' or 'yearly')
+ * @param options - Optional configuration including success_url and cancel_url
  * @returns Checkout URL to redirect user to Stripe Checkout
+ *
+ * @example
+ * // Use default deep links
+ * const url = await initiateProSubscription('monthly');
+ *
+ * @example
+ * // Use custom URLs (recommended: Universal Links/App Links)
+ * const url = await initiateProSubscription('monthly', {
+ *   successUrl: 'https://yourapp.com/payment/success?session_id={CHECKOUT_SESSION_ID}',
+ *   cancelUrl: 'https://yourapp.com/payment/cancel',
+ * });
+ *
+ * @example
+ * // Use deep links explicitly
+ * const url = await initiateProSubscription('monthly', {
+ *   successUrl: 'snapsell://payment/success?session_id={CHECKOUT_SESSION_ID}',
+ *   cancelUrl: 'snapsell://payment/cancel',
+ * });
  */
 export async function initiateProSubscription(
-  plan: 'monthly' | 'yearly'
+  plan: 'monthly' | 'yearly',
+  options?: CheckoutOptions
 ): Promise<string> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
@@ -102,22 +226,55 @@ export async function initiateProSubscription(
       throw new Error('Supabase Edge Functions URL not configured');
     }
 
+    const requestBody: any = {
+      type: 'subscription',
+      subscription_plan: plan,
+      user_id: session.user.id,
+    };
+
+    // Only include URLs if provided (backend will use defaults if not provided)
+    if (options?.successUrl) {
+      requestBody.success_url = options.successUrl;
+    }
+    if (options?.cancelUrl) {
+      requestBody.cancel_url = options.cancelUrl;
+    }
+
     const response = await fetch(`${EDGE_FUNCTION_BASE}/create-checkout-session`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${session.access_token}`,
       },
-      body: JSON.stringify({
-        type: 'subscription',
-        subscription_plan: plan,
-        user_id: session.user.id,
-      }),
+      body: JSON.stringify(requestBody),
     });
 
     if (!response.ok) {
-      const error = await response.json().catch(() => ({ error: 'Failed to create checkout session' }));
-      throw new Error(error.error || 'Failed to create checkout session');
+      // Try to get error details from response
+      let errorMessage = 'Failed to create checkout session';
+      let errorDetails: any = null;
+
+      try {
+        const errorText = await response.text();
+        try {
+          errorDetails = JSON.parse(errorText);
+          errorMessage = errorDetails.error || errorDetails.message || errorMessage;
+        } catch {
+          // Response is not JSON, might be HTML or plain text
+          errorMessage = `Backend error (${response.status} ${response.statusText}): ${errorText.substring(0, 200)}`;
+        }
+      } catch (e) {
+        errorMessage = `Backend error: ${response.status} ${response.statusText}`;
+      }
+
+      console.error('Checkout session creation failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorDetails,
+        url: `${EDGE_FUNCTION_BASE}/create-checkout-session`,
+      });
+
+      throw new Error(errorMessage);
     }
 
     const data: CheckoutSessionResponse = await response.json();
@@ -214,5 +371,52 @@ export async function verifyPayment(sessionId: string): Promise<{
   } catch (error: any) {
     console.error('Payment verification error:', error);
     return { verified: false, error: error.message };
+  }
+}
+
+/**
+ * Payment history record
+ */
+export interface PaymentHistoryItem {
+  id: string;
+  user_id: string;
+  type: 'credits' | 'subscription';
+  credits?: number;
+  amount: number;
+  currency: string;
+  status: string;
+  stripe_payment_intent_id?: string;
+  stripe_session_id?: string;
+  created_at: string;
+}
+
+/**
+ * Get payment history for the current user
+ * @param limit - Maximum number of records to return (default: 20)
+ * @returns Array of payment history items
+ */
+export async function getPaymentHistory(limit: number = 20): Promise<{
+  payments: PaymentHistoryItem[];
+  error: any | null;
+}> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      return { payments: [], error: { message: 'Not authenticated' } };
+    }
+
+    const { data: payments, error } = await supabase
+      .from('stripe_payments')
+      .select('*')
+      .eq('user_id', session.user.id)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    if (error) throw error;
+
+    return { payments: payments || [], error: null };
+  } catch (error: any) {
+    console.error('Error fetching payment history:', error);
+    return { payments: [], error };
   }
 }

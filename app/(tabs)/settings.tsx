@@ -156,10 +156,10 @@ export default function SettingsScreen() {
             ) : quota ? (
               <View style={styles.quotaContainer}>
                 <Text style={styles.quotaText}>
-                  {quota.used} / {quota.limit} listings used
+                  {quota.used} / {quota.limit} Save Slots used
                 </Text>
                 <Text style={styles.quotaSubtext}>
-                  {quota.remaining} remaining
+                  {quota.remaining} Save Slots remaining
                 </Text>
                 {quota.remaining === 0 && (
                   <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
@@ -172,9 +172,9 @@ export default function SettingsScreen() {
             )
           ) : (
             <View style={styles.quotaContainer}>
-              <Text style={styles.quotaText}>Sign in to view your listing quota and usage</Text>
+              <Text style={styles.quotaText}>Sign in to view your Save Slots quota and usage</Text>
               <Text style={styles.quotaSubtext}>
-                Free tier includes 3-5 listings
+                Free tier includes 3-5 Save Slots
               </Text>
               <Pressable
                 onPress={() => router.push('/(auth)/sign-in')}

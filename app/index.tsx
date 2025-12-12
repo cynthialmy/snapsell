@@ -4,14 +4,14 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -413,10 +413,10 @@ export default function HomeScreen() {
         {user && quota && (
           <View style={styles.quotaCard}>
             <Text style={styles.quotaText}>
-              {quota.used} / {quota.limit} listings used
+              {quota.used} / {quota.limit} Save Slots used
             </Text>
             <Text style={styles.quotaSubtext}>
-              {quota.remaining} remaining
+              {quota.remaining} Save Slots remaining
             </Text>
             {quota.remaining === 0 && (
               <Pressable

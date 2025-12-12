@@ -57,7 +57,11 @@ interface PaymentVerificationResponse {
  * Create checkout session for credit purchase
  */
 export async function initiateCreditPurchase(
-  credits: 10 | 25 | 60
+  credits: 10 | 25 | 60,
+  options?: {
+    successUrl?: string;
+    cancelUrl?: string;
+  }
 ): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
@@ -74,6 +78,8 @@ export async function initiateCreditPurchase(
       type: 'credits',
       credits: credits,
       user_id: session.user.id,
+      success_url: options?.successUrl,
+      cancel_url: options?.cancelUrl,
     }),
   });
 
@@ -90,7 +96,11 @@ export async function initiateCreditPurchase(
  * Create checkout session for Pro subscription
  */
 export async function initiateProSubscription(
-  plan: 'monthly' | 'yearly'
+  plan: 'monthly' | 'yearly',
+  options?: {
+    successUrl?: string;
+    cancelUrl?: string;
+  }
 ): Promise<string> {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) {
@@ -107,6 +117,8 @@ export async function initiateProSubscription(
       type: 'subscription',
       subscription_plan: plan,
       user_id: session.user.id,
+      success_url: options?.successUrl,
+      cancel_url: options?.cancelUrl,
     }),
   });
 
@@ -175,21 +187,52 @@ export function UpgradeScreen() {
   const handlePurchaseCredits = async (credits: 10 | 25 | 60) => {
     try {
       setLoading(true);
-      const checkoutUrl = await initiateCreditPurchase(credits);
+
+      // IMPORTANT: Always provide success_url and cancel_url
+      // Option 1: Use deep link URLs (may not work in all browsers)
+      const deepLinkScheme = 'snapsell'; // or get from your config
+      const successUrl = `${deepLinkScheme}://payment/success?session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${deepLinkScheme}://payment/cancel`;
+
+      // Option 2: Use your backend's payment-success endpoint (recommended)
+      // const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
+      // const successUrl = `${supabaseUrl}/functions/v1/payment-success?session_id={CHECKOUT_SESSION_ID}`;
+      // const cancelUrl = `${supabaseUrl}/functions/v1/payment-success?cancelled=true`;
+
+      const checkoutUrl = await initiateCreditPurchase(credits, {
+        successUrl,
+        cancelUrl,
+      });
 
       // Open Stripe checkout in browser
       const canOpen = await Linking.canOpenURL(checkoutUrl);
       if (canOpen) {
         await Linking.openURL(checkoutUrl);
+
+        // IMPORTANT: Set up a listener for when user returns from payment
+        // The webhook processes payment automatically, but we should refresh user data
+        const checkPaymentStatus = async () => {
+          // Wait a few seconds for webhook to process
+          await new Promise(resolve => setTimeout(resolve, 3000));
+
+          // Refresh user data to get updated credits
+          try {
+            await refreshUser();
+            console.log('User data refreshed after payment');
+          } catch (error) {
+            console.error('Failed to refresh user data:', error);
+          }
+        };
+
         Alert.alert(
           'Payment Started',
-          'Complete your payment in the browser. Your credits will be added automatically.',
+          'Complete your payment in the browser. Your credits will be added automatically when you return to the app.',
           [
             {
               text: 'OK',
               onPress: () => {
-                // Optionally poll for payment status or refresh user data
-                setTimeout(() => refreshUser(), 5000);
+                // Start checking payment status
+                checkPaymentStatus();
               },
             },
           ]
@@ -207,7 +250,16 @@ export function UpgradeScreen() {
   const handleSubscribe = async (plan: 'monthly' | 'yearly') => {
     try {
       setLoading(true);
-      const checkoutUrl = await initiateProSubscription(plan);
+
+      // Optional: Set up deep link URLs for redirect after payment
+      const deepLinkScheme = 'snapsell'; // or get from your config
+      const successUrl = `${deepLinkScheme}://payment/success?session_id={CHECKOUT_SESSION_ID}`;
+      const cancelUrl = `${deepLinkScheme}://payment/cancel`;
+
+      const checkoutUrl = await initiateProSubscription(plan, {
+        successUrl,
+        cancelUrl,
+      });
 
       const canOpen = await Linking.canOpenURL(checkoutUrl);
       if (canOpen) {
@@ -356,30 +408,73 @@ useEffect(() => {
    - App can poll `verify-payment` endpoint
    - Or wait for webhook to process and refresh user data
 
+## Deep Link URLs
+
+The backend now accepts `success_url` and `cancel_url` from the frontend request. You can pass deep link URLs:
+
+```typescript
+// Example with deep links
+const checkoutUrl = await initiateCreditPurchase(10, {
+  successUrl: 'snapsell://payment/success?session_id={CHECKOUT_SESSION_ID}',
+  cancelUrl: 'snapsell://payment/cancel',
+});
+```
+
+**Important Notes:**
+- Custom scheme URLs (`snapsell://`) may not work reliably in all browsers
+- **Recommended:** Use Universal Links (iOS) / App Links (Android) instead of custom schemes
+- **Alternative:** Use a web redirect page that redirects to your deep link
+- **Fallback:** The webhook processes payments automatically; users can manually return to the app
+
 ## Testing
 
-1. Use Stripe test mode for development
-2. Test credit purchases with test card: `4242 4242 4242 4242`
-3. Verify credits are added to user account
-4. Test subscription creation and cancellation
-5. Verify webhook events in Stripe Dashboard
+1. **Backend Sandbox Mode:** Set `STRIPE_MODE=test` in Supabase secrets to use sandbox products and keys
+2. **Test Cards:** Use Stripe test cards:
+   - Success: `4242 4242 4242 4242`
+   - Decline: `4000 0000 0000 0002`
+   - 3D Secure: `4000 0025 0000 3155`
+   - Use any future expiry date and any 3-digit CVC
+3. **Test Mode Indicator:** Stripe Checkout will automatically show "TEST MODE" when using test keys
+4. Verify credits are added to user account after successful test payment
+5. Test subscription creation and cancellation
+6. Verify webhook events in Stripe Dashboard (Test mode)
+
+**Note:** No frontend code changes needed - the backend automatically handles test vs production mode. The same frontend code works for both.
 
 ## Troubleshooting
 
+**"Requested path is invalid" error after payment:**
+- This happens if the success URL points to a non-existent path
+- **Solution:** Always pass `success_url` and `cancel_url` from frontend
+- Or deploy the `payment-success` Edge Function and use it as success URL
+- The webhook still processes payment even if redirect fails
+
 **Payment not processing:**
-- Check Stripe webhook is configured correctly
+- Check Stripe webhook is configured correctly in Stripe Dashboard
+- Verify webhook events are being received (check Stripe Dashboard → Webhooks → Events)
+- Check Edge Function logs in Supabase Dashboard → Edge Functions → Logs
 - Verify `STRIPE_PRODUCTS_MAPPING` is set in Supabase secrets
-- Check Edge Function logs in Supabase Dashboard
+- Check if `STRIPE_MODE` matches your Stripe account mode (test vs live)
 
 **Credits not added:**
-- Verify webhook received `checkout.session.completed` event
-- Check `stripe_payments` table for payment record
+- **Most common:** Frontend not refreshing user data after payment
+- **Solution:** Call `refreshUser()` or refetch user profile after returning from payment
+- Verify webhook received `checkout.session.completed` event in Stripe Dashboard
+- Check `stripe_payments` table: `SELECT * FROM stripe_payments ORDER BY created_at DESC LIMIT 5;`
+- Check user credits: `SELECT id, credits FROM users_profile WHERE id = 'your_user_id';`
 - Verify user_id matches in checkout session metadata
+- Check Edge Function logs for webhook processing errors
 
 **Checkout URL not opening:**
 - Ensure `expo-linking` is installed
 - Check URL format is valid
 - Test with `Linking.canOpenURL()` first
+
+**Webhook not receiving events:**
+- Verify webhook URL is correct: `https://YOUR_PROJECT_REF.supabase.co/functions/v1/stripe-webhook`
+- Check webhook is active in Stripe Dashboard
+- Verify webhook secret matches (`STRIPE_WEBHOOK_SECRET` or `STRIPE_WEBHOOK_SECRET_SANDBOX`)
+- Test webhook by sending a test event from Stripe Dashboard
 
 ## Security Notes
 

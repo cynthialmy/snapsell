@@ -4,40 +4,36 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { trackEvent } from '@/utils/analytics';
 
-interface QuotaModalProps {
+interface SaveSlotsPaywallProps {
   visible: boolean;
-  count: number;
-  period: string;
-  onUpgrade: () => void;
-  onContinueFree: () => void;
-  onDismiss: () => void;
+  limit: number;
+  onBuySlots: () => void;
+  onGoUnlimited: () => void;
+  onDismiss?: () => void;
 }
 
-export function QuotaModal({
+export function SaveSlotsPaywall({
   visible,
-  count,
-  period,
-  onUpgrade,
-  onContinueFree,
+  limit,
+  onBuySlots,
+  onGoUnlimited,
   onDismiss,
-}: QuotaModalProps) {
-  // Track when modal is shown
+}: SaveSlotsPaywallProps) {
+  // Track when paywall is shown
   React.useEffect(() => {
     if (visible) {
-      trackEvent('quota_modal_shown', { count, period });
+      trackEvent('save_slots_paywall_shown', { limit });
     }
-  }, [visible, count, period]);
+  }, [visible, limit]);
 
-  const handleUpgrade = () => {
-    trackEvent('quota_upgrade_tap', { count, period });
-    onUpgrade();
-    onDismiss();
+  const handleBuySlots = () => {
+    trackEvent('save_slots_paywall_buy_slots', { limit });
+    onBuySlots();
   };
 
-  const handleContinueFree = () => {
-    trackEvent('quota_continue_free', { count, period });
-    onContinueFree();
-    onDismiss();
+  const handleGoUnlimited = () => {
+    trackEvent('save_slots_paywall_go_unlimited', { limit });
+    onGoUnlimited();
   };
 
   return (
@@ -50,29 +46,29 @@ export function QuotaModal({
         <Pressable style={styles.backdrop} onPress={onDismiss} />
         <SafeAreaView style={styles.modalContainer} edges={['bottom']}>
           <View style={styles.modal}>
-            <Text style={styles.headline}>You're doing great!</Text>
+            <Text style={styles.emoji}>🦦</Text>
+            <Text style={styles.headline}>You've used all {limit} free Save Slots!</Text>
             <Text style={styles.copy}>
-              You've saved {count} listing{count !== 1 ? 's' : ''} this {period}. Keep going
-              with SnapSell Pro - unlimited Save Slots.
+              Unlock more to keep growing your resale pile. Creating listings is always free — Save Slots are only used when you save a listing.
             </Text>
 
             <View style={styles.buttons}>
               <Pressable
-                onPress={handleUpgrade}
+                onPress={handleBuySlots}
                 style={({ pressed }) => [
                   styles.primaryButton,
                   pressed && styles.primaryButtonPressed,
                 ]}>
-                <Text style={styles.primaryButtonText}>Upgrade</Text>
+                <Text style={styles.primaryButtonText}>Buy 10 Save Slots</Text>
               </Pressable>
 
               <Pressable
-                onPress={handleContinueFree}
+                onPress={handleGoUnlimited}
                 style={({ pressed }) => [
                   styles.secondaryButton,
                   pressed && styles.secondaryButtonPressed,
                 ]}>
-                <Text style={styles.secondaryButtonText}>Continue Free</Text>
+                <Text style={styles.secondaryButtonText}>Go Unlimited</Text>
               </Pressable>
             </View>
           </View>
@@ -108,6 +104,11 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.25,
     shadowRadius: 12,
     elevation: 8,
+    alignItems: 'center',
+  },
+  emoji: {
+    fontSize: 48,
+    marginBottom: 12,
   },
   headline: {
     fontSize: 24,
@@ -124,6 +125,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   buttons: {
+    width: '100%',
     gap: 12,
   },
   primaryButton: {

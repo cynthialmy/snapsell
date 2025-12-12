@@ -189,27 +189,55 @@ function RootLayoutNav() {
       await handleAuthCallback(event.url);
 
       // Handle payment callback (Stripe redirects to success URL)
-      if (path === 'payment/callback' || path === 'payment/success') {
+      // Check both path and full URL to catch different redirect formats
+      if (path === 'payment/callback' || path === 'payment/success' || path === 'payment/cancel' ||
+          event.url.includes('/payment/success') || event.url.includes('/payment/cancel')) {
         const callback = parsePaymentCallback(event.url);
+
+        if (path === 'payment/cancel') {
+          Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
+          router.push('/(tabs)/upgrade');
+          return;
+        }
+
         if (callback.status === 'success' && callback.sessionId) {
-          try {
-            const result = await verifyPaymentStatus(callback.sessionId);
-            // Payment verified successfully
-            Alert.alert(
-              'Payment Successful',
-              `You now have ${result.user.credits} credits!`
-            );
-            // Refresh user data
-            await refreshUser();
-            router.push('/(tabs)/upgrade');
-          } catch (error: any) {
-            console.error('Payment verification error:', error);
-            Alert.alert('Payment Verification', 'Payment received but verification failed. Your account will be updated shortly.');
-            // Still refresh user data in case webhook already processed it
-            await refreshUser();
-          }
+          const sessionId = callback.sessionId; // Store in const for closure
+          // Wait a bit for webhook to process payment before verifying
+          // The webhook processes payments automatically, so we just need to refresh user data
+          router.push('/(tabs)/upgrade');
+
+          // Wait 3 seconds for webhook to process, then refresh and verify
+          setTimeout(async () => {
+            try {
+              // Refresh user data first (webhook should have processed by now)
+              await refreshUser();
+
+              // Try to verify payment status
+              try {
+                const result = await verifyPaymentStatus(sessionId);
+                Alert.alert(
+                  'Payment Successful',
+                  `You now have ${result.user.credits} credits!`
+                );
+              } catch (verifyError) {
+                // Verification failed, but webhook might have processed it
+                // Just show a generic success message
+                Alert.alert(
+                  'Payment Successful',
+                  'Your payment has been processed. Your credits will be updated shortly.'
+                );
+              }
+            } catch (error: any) {
+              console.error('Error refreshing user after payment:', error);
+              Alert.alert(
+                'Payment Received',
+                'Your payment is being processed. Please check your account in a moment.'
+              );
+            }
+          }, 3000);
         } else if (callback.status === 'failed' || callback.status === 'cancelled') {
           Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
+          router.push('/(tabs)/upgrade');
         }
       }
 
@@ -228,27 +256,55 @@ function RootLayoutNav() {
         await handleAuthCallback(url);
 
         // Handle payment callback on app launch
-        if (path === 'payment/callback' || path === 'payment/success') {
+        // Check both path and full URL to catch different redirect formats
+        if (path === 'payment/callback' || path === 'payment/success' || path === 'payment/cancel' ||
+            url.includes('/payment/success') || url.includes('/payment/cancel')) {
           const callback = parsePaymentCallback(url);
-          if (callback.status === 'success' && callback.sessionId) {
-            try {
-              const result = await verifyPaymentStatus(callback.sessionId);
-              // Payment verified successfully
-              Alert.alert(
-                'Payment Successful',
-                `You now have ${result.user.credits} credits!`
-              );
-              // Refresh user data
-              await refreshUser();
-              router.push('/(tabs)/upgrade');
-            } catch (error: any) {
-              console.error('Payment verification error:', error);
-              Alert.alert('Payment Verification', 'Payment received but verification failed. Your account will be updated shortly.');
-              // Still refresh user data in case webhook already processed it
-              await refreshUser();
-            }
-          } else if (callback.status === 'failed' || callback.status === 'cancelled') {
+
+          if (path === 'payment/cancel' || url.includes('/payment/cancel') || callback.status === 'cancelled') {
             Alert.alert('Payment Cancelled', 'Your payment was cancelled. No charges were made.');
+            router.push('/(tabs)/upgrade');
+            return;
+          }
+
+          if (callback.status === 'success' && callback.sessionId) {
+            const sessionId = callback.sessionId; // Store in const for closure
+            // Wait a bit for webhook to process payment before verifying
+            // The webhook processes payments automatically, so we just need to refresh user data
+            router.push('/(tabs)/upgrade');
+
+            // Wait 3 seconds for webhook to process, then refresh and verify
+            setTimeout(async () => {
+              try {
+                // Refresh user data first (webhook should have processed by now)
+                await refreshUser();
+
+                // Try to verify payment status
+                try {
+                  const result = await verifyPaymentStatus(sessionId);
+                  Alert.alert(
+                    'Payment Successful',
+                    `You now have ${result.user.credits} Save Slots!`
+                  );
+                } catch (verifyError) {
+                  // Verification failed, but webhook might have processed it
+                  // Just show a generic success message
+                  Alert.alert(
+                    'Payment Successful',
+                    'Your payment has been processed. Your Save Slots will be updated shortly.'
+                  );
+                }
+              } catch (error: any) {
+                console.error('Error refreshing user after payment:', error);
+                Alert.alert(
+                  'Payment Received',
+                  'Your payment is being processed. Please check your account in a moment.'
+                );
+              }
+            }, 3000);
+          } else if (callback.status === 'failed') {
+            Alert.alert('Payment Failed', 'Your payment could not be processed. Please try again.');
+            router.push('/(tabs)/upgrade');
           }
         }
 
