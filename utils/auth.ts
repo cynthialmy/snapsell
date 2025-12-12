@@ -138,8 +138,7 @@ export async function signInWithGoogle() {
     }
 
     if (result.type === 'success' && result.url) {
-      // The deep link handler in _layout.tsx will process the callback
-      // Extract tokens from URL to verify the flow started
+      // Process the callback URL directly to set the session
       const url = result.url;
       const hashIndex = url.indexOf('#');
 
@@ -147,17 +146,45 @@ export async function signInWithGoogle() {
         const hashFragment = url.substring(hashIndex + 1);
         const hashParams = new URLSearchParams(hashFragment);
         const accessToken = hashParams.get('access_token');
+        const refreshToken = hashParams.get('refresh_token');
 
-        if (accessToken) {
-          // Session will be set by the deep link handler
-          // Return success to indicate OAuth flow completed
-          return { data: { user: null }, error: null };
+        if (accessToken && refreshToken) {
+          // Set the session directly
+          console.log('Setting session from Google OAuth callback...');
+          const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+          if (sessionError) {
+            console.error('Error setting session from Google OAuth:', sessionError);
+            return { data: null, error: sessionError };
+          }
+
+          if (sessionData.session) {
+            console.log('Session set successfully from Google OAuth');
+            // Get the user to return
+            const { data: { user }, error: userError } = await supabase.auth.getUser();
+            if (userError) {
+              console.error('Error getting user after Google OAuth:', userError);
+            }
+            return { data: { user: user || sessionData.user, session: sessionData.session }, error: null };
+          }
         }
       }
 
-      // If we get here, the callback was received but tokens weren't in the URL
-      // The deep link handler should have processed it, so return success
-      return { data: { user: null }, error: null };
+      // If tokens weren't in the URL, the deep link handler should process it
+      // But also check if session was created (in case detectSessionInUrl worked)
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      if (!sessionError && session) {
+        console.log('Session found after Google OAuth (via detectSessionInUrl)');
+        const { data: { user } } = await supabase.auth.getUser();
+        return { data: { user, session }, error: null };
+      }
+
+      // If we get here, no session was created
+      console.warn('Google OAuth callback received but no session was created');
+      return { data: null, error: { message: 'OAuth flow completed but session was not created. Please try signing in again.' } };
     }
 
     return { data: null, error: { message: 'OAuth flow failed' } };
@@ -181,6 +208,18 @@ export async function signInWithApple() {
     if (Platform.OS === 'ios') {
       // Use native Sign in with Apple on iOS
       try {
+        // Check if Sign in with Apple is available
+        const isAvailable = await AppleAuthentication.isAvailableAsync();
+        if (!isAvailable) {
+          return {
+            data: null,
+            error: {
+              message:
+                'Sign in with Apple is not available. Please test on a physical iOS device (not simulator) and ensure Sign in with Apple is configured in Apple Developer Portal.',
+            },
+          };
+        }
+
         const credential = await AppleAuthentication.signInAsync({
           requestedScopes: [
             AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
@@ -204,10 +243,28 @@ export async function signInWithApple() {
         return { data, error: null };
       } catch (error: any) {
         // Handle user cancellation
-        if (error.code === 'ERR_REQUEST_CANCELED') {
+        if (error.code === 'ERR_REQUEST_CANCELED' || error.code === 'ERR_REQUEST_CANCELED') {
           return { data: null, error: { message: 'Sign in cancelled' } };
         }
-        throw error;
+
+        // Handle common Apple authentication errors
+        if (error.code === 'ERR_REQUEST_UNKNOWN' || error.message?.includes('authorization failed')) {
+          return {
+            data: null,
+            error: {
+              message:
+                'Apple sign in failed. Make sure you are testing on a physical iOS device (not simulator) and that Sign in with Apple is properly configured in Apple Developer Portal for your App ID.',
+            },
+          };
+        }
+
+        // Return the original error for other cases
+        return {
+          data: null,
+          error: {
+            message: error.message || 'Apple sign in failed. Please try again or use email sign in.',
+          },
+        };
       }
     } else {
       // Android: Use web-based OAuth (same as Google)
@@ -220,7 +277,7 @@ export async function signInWithApple() {
       }
 
       if (result.type === 'success' && result.url) {
-        // The deep link handler in _layout.tsx will process the callback
+        // Process the callback URL directly to set the session
         const url = result.url;
         const hashIndex = url.indexOf('#');
 
@@ -228,13 +285,45 @@ export async function signInWithApple() {
           const hashFragment = url.substring(hashIndex + 1);
           const hashParams = new URLSearchParams(hashFragment);
           const accessToken = hashParams.get('access_token');
+          const refreshToken = hashParams.get('refresh_token');
 
-          if (accessToken) {
-            return { data: { user: null }, error: null };
+          if (accessToken && refreshToken) {
+            // Set the session directly
+            console.log('Setting session from Apple OAuth callback...');
+            const { data: sessionData, error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken,
+            });
+
+            if (sessionError) {
+              console.error('Error setting session from Apple OAuth:', sessionError);
+              return { data: null, error: sessionError };
+            }
+
+            if (sessionData.session) {
+              console.log('Session set successfully from Apple OAuth');
+              // Get the user to return
+              const { data: { user }, error: userError } = await supabase.auth.getUser();
+              if (userError) {
+                console.error('Error getting user after Apple OAuth:', userError);
+              }
+              return { data: { user: user || sessionData.user, session: sessionData.session }, error: null };
+            }
           }
         }
 
-        return { data: { user: null }, error: null };
+        // If tokens weren't in the URL, the deep link handler should process it
+        // But also check if session was created (in case detectSessionInUrl worked)
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        if (!sessionError && session) {
+          console.log('Session found after Apple OAuth (via detectSessionInUrl)');
+          const { data: { user } } = await supabase.auth.getUser();
+          return { data: { user, session }, error: null };
+        }
+
+        // If we get here, no session was created
+        console.warn('Apple OAuth callback received but no session was created');
+        return { data: null, error: { message: 'OAuth flow completed but session was not created. Please try signing in again.' } };
       }
 
       return { data: null, error: { message: 'OAuth flow failed' } };

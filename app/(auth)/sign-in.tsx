@@ -1,15 +1,15 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -120,9 +120,34 @@ export default function SignInScreen() {
       return;
     }
 
-    // OAuth flow completed - deep link handler will process the callback
-    // and navigate the user. We just track success here.
-    trackEvent('sign_in_succeeded', { method: 'google' });
+    // Check if we have a user/session from OAuth
+    if (data?.user || data?.session) {
+      trackEvent('sign_in_succeeded', { method: 'google' });
+      // Navigate to home screen
+      if (params.returnTo) {
+        router.replace(params.returnTo as any);
+      } else {
+        router.replace('/(tabs)');
+      }
+    } else {
+      // OAuth flow completed but no session yet - deep link handler should process it
+      // Wait a moment and check session
+      setTimeout(async () => {
+        const { getUser } = await import('@/utils/auth');
+        const { user } = await getUser();
+        if (user) {
+          trackEvent('sign_in_succeeded', { method: 'google' });
+          if (params.returnTo) {
+            router.replace(params.returnTo as any);
+          } else {
+            router.replace('/(tabs)');
+          }
+        } else {
+          // Session still not set, show error
+          setError('Sign in completed but session was not created. Please try again.');
+        }
+      }, 1000);
+    }
   };
 
   const handleAppleSignIn = async () => {
@@ -148,17 +173,33 @@ export default function SignInScreen() {
       return;
     }
 
-    if (data?.user) {
+    // Check if we have a user/session from OAuth
+    if (data?.user || data?.session) {
       trackEvent('sign_in_succeeded', { method: 'apple' });
-      // If we came from listing preview, go back there; otherwise go to tabs
+      // Navigate to home screen
       if (params.returnTo) {
         router.replace(params.returnTo as any);
       } else {
         router.replace('/(tabs)');
       }
     } else {
-      // OAuth flow completed - deep link handler will process the callback
-      trackEvent('sign_in_succeeded', { method: 'apple' });
+      // OAuth flow completed but no session yet - deep link handler should process it
+      // Wait a moment and check session
+      setTimeout(async () => {
+        const { getUser } = await import('@/utils/auth');
+        const { user } = await getUser();
+        if (user) {
+          trackEvent('sign_in_succeeded', { method: 'apple' });
+          if (params.returnTo) {
+            router.replace(params.returnTo as any);
+          } else {
+            router.replace('/(tabs)');
+          }
+        } else {
+          // Session still not set, show error
+          setError('Sign in completed but session was not created. Please try again.');
+        }
+      }, 1000);
     }
   };
 

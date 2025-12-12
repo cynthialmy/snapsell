@@ -256,10 +256,21 @@ Your **Redirect URLs** should include:
 - Make sure you're testing on a physical iOS device (Sign in with Apple doesn't work in iOS Simulator)
 - Check that your app's Bundle Identifier matches the Primary App ID configured in Apple Developer Portal
 
-**Native Apple Sign In not working**
-- Ensure you're testing on a physical iOS device (not simulator)
-- Verify the app is properly configured with the correct Bundle Identifier
-- Check that Sign in with Apple capability is enabled in your Apple Developer account
+**Native Apple Sign In not working / Error -7026 or Code 1000**
+- **Most common cause:** Testing on iOS Simulator. Sign in with Apple **only works on physical iOS devices**, not in the iOS Simulator. Test on a real device.
+- Verify the App ID in Apple Developer Portal has "Sign in with Apple" capability enabled:
+  1. Go to Apple Developer Portal → Certificates, Identifiers & Profiles → Identifiers
+  2. Find your App ID (`com.cynthiamengyuanli.snapsell`)
+  3. Make sure "Sign in with Apple" is checked under Capabilities
+- Ensure your app's Bundle Identifier in `app.json` exactly matches the App ID in Apple Developer Portal
+- Rebuild the app after configuring Sign in with Apple in Apple Developer Portal:
+  ```bash
+  npx expo prebuild --clean
+  npx expo run:ios --device
+  ```
+- Check that you're signed in with an Apple ID that has access to the Apple Developer account
+- Verify the app is properly signed with a provisioning profile that includes Sign in with Apple
+- If using EAS Build, make sure your provisioning profile includes the Sign in with Apple entitlement
 
 ### General OAuth Issues
 

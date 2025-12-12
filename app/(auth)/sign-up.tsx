@@ -118,9 +118,33 @@ export default function SignUpScreen() {
       return;
     }
 
-    // OAuth flow completed - deep link handler will process the callback
-    // and navigate the user. We just track success here.
-    trackEvent('sign_up_succeeded', { method: 'google' });
+    // Check if we have a user/session from OAuth
+    if (data?.user || data?.session) {
+      trackEvent('sign_up_succeeded', { method: 'google' });
+      Alert.alert(
+        'Account created',
+        'Your account has been created successfully!',
+        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+      );
+    } else {
+      // OAuth flow completed but no session yet - deep link handler should process it
+      // Wait a moment and check session
+      setTimeout(async () => {
+        const { getUser } = await import('@/utils/auth');
+        const { user } = await getUser();
+        if (user) {
+          trackEvent('sign_up_succeeded', { method: 'google' });
+          Alert.alert(
+            'Account created',
+            'Your account has been created successfully!',
+            [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+          );
+        } else {
+          // Session still not set, show error
+          setError('Sign up completed but session was not created. Please try signing in again.');
+        }
+      }, 1000);
+    }
   };
 
   const handleAppleSignUp = async () => {
@@ -146,7 +170,8 @@ export default function SignUpScreen() {
       return;
     }
 
-    if (data?.user) {
+    // Check if we have a user/session from OAuth
+    if (data?.user || data?.session) {
       trackEvent('sign_up_succeeded', { method: 'apple' });
       Alert.alert(
         'Account created',
@@ -154,8 +179,23 @@ export default function SignUpScreen() {
         [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
       );
     } else {
-      // OAuth flow completed - deep link handler will process the callback
-      trackEvent('sign_up_succeeded', { method: 'apple' });
+      // OAuth flow completed but no session yet - deep link handler should process it
+      // Wait a moment and check session
+      setTimeout(async () => {
+        const { getUser } = await import('@/utils/auth');
+        const { user } = await getUser();
+        if (user) {
+          trackEvent('sign_up_succeeded', { method: 'apple' });
+          Alert.alert(
+            'Account created',
+            'Your account has been created successfully!',
+            [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+          );
+        } else {
+          // Session still not set, show error
+          setError('Sign up completed but session was not created. Please try signing in again.');
+        }
+      }, 1000);
     }
   };
 
