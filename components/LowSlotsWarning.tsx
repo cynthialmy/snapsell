@@ -4,6 +4,7 @@ import { Animated, Pressable, StyleSheet, Text, View } from 'react-native';
 interface LowSlotsWarningProps {
   visible: boolean;
   remaining: number;
+  type?: 'save' | 'creation';
   onDismiss: () => void;
   onUpgrade?: () => void;
 }

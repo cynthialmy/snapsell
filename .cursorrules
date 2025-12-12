@@ -263,3 +263,24 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
   - Improved error handling for update operations
 
 **Status:** ✅ Fixed - All issues resolved, instrumentation removed
+
+## Fix Duplicate Listings After Purchase (2025-01-XX)
+
+**Problem:** After making a purchase of credits, duplicate listings suddenly appear in the "my listings" tab. The migration function was being triggered multiple times, creating duplicates.
+
+**Root Cause:**
+- `migrateLocalListingsToBackend()` was called on every auth state change (including after `refreshUser()` is called post-purchase)
+- No protection against concurrent migrations
+- Local listings weren't being cleared if migration was already complete, allowing re-migration
+
+**Solution Implemented:**
+- Added migration lock (`migrationInProgress`) to prevent concurrent migrations
+- Added session-level flag (`migrationAttempted`) in AuthContext to prevent multiple migration attempts in the same session
+- Added logic to clear local listings if migration is already complete (prevents re-migration attempts)
+- Improved logging to help debug migration issues
+
+**Key Changes:**
+- `utils/listings-api.ts`: Added migration lock and logic to clear local listings when migration is already complete
+- `contexts/AuthContext.tsx`: Added session-level flag to prevent migration from running multiple times per session
+
+**Status:** ✅ Fixed - Migration now runs only once per user, preventing duplicate listings

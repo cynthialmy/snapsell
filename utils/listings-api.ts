@@ -776,6 +776,9 @@ export async function submitFeedback(params: {
 // Migration: Local to Backend
 // ============================================
 
+// Migration lock to prevent concurrent migrations
+let migrationInProgress = false;
+
 /**
  * Convert image URI to base64 string
  */
@@ -869,6 +872,12 @@ export async function migrateLocalListingsToBackend(): Promise<{
   skipped: boolean;
   error: any;
 }> {
+  // Prevent concurrent migrations
+  if (migrationInProgress) {
+    console.log('[Migration] Migration already in progress, skipping...');
+    return { migrated: 0, failed: 0, skipped: true, error: null };
+  }
+
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session || !session.user) {
@@ -879,8 +888,17 @@ export async function migrateLocalListingsToBackend(): Promise<{
 
     // Check if migration already completed
     if (await hasMigrationCompleted(userId)) {
+      // If migration is complete, ensure local listings are cleared to prevent re-migration
+      const localListings = await loadListings();
+      if (localListings.length > 0) {
+        console.log('[Migration] Migration already completed, but local listings still exist. Clearing them...');
+        await clearListings();
+      }
       return { migrated: 0, failed: 0, skipped: true, error: null };
     }
+
+    // Set migration lock
+    migrationInProgress = true;
 
     // Load local listings
     const localListings = await loadListings();
@@ -1011,5 +1029,8 @@ export async function migrateLocalListingsToBackend(): Promise<{
   } catch (error: any) {
     console.error('Migration error:', error);
     return { migrated: 0, failed: 0, skipped: false, error };
+  } finally {
+    // Always release migration lock
+    migrationInProgress = false;
   }
 }

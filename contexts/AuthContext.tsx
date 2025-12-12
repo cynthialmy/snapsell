@@ -19,6 +19,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const [migrationAttempted, setMigrationAttempted] = useState(false);
 
   const refreshUser = async () => {
     try {
@@ -95,18 +96,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
 
         // Migrate local listings to backend when user signs in
-        // Run migration in background (don't block UI)
-        migrateLocalListingsToBackend().then((result) => {
-          if (result.error && !result.skipped) {
-            console.warn('Migration completed with some errors:', result);
-          } else if (result.migrated > 0) {
-            console.log(`Successfully migrated ${result.migrated} listing(s) to backend`);
-          }
-        }).catch((error) => {
-          console.error('Migration error:', error);
-        });
+        // Only run migration once per session to prevent duplicates
+        // The migration function itself also checks if migration was already completed
+        if (!migrationAttempted) {
+          setMigrationAttempted(true);
+          // Run migration in background (don't block UI)
+          migrateLocalListingsToBackend().then((result) => {
+            if (result.error && !result.skipped) {
+              console.warn('Migration completed with some errors:', result);
+            } else if (result.migrated > 0) {
+              console.log(`Successfully migrated ${result.migrated} listing(s) to backend`);
+            } else if (result.skipped) {
+              console.log('[Migration] Migration skipped (already completed or no local listings)');
+            }
+          }).catch((error) => {
+            console.error('Migration error:', error);
+            // Reset flag on error so migration can be retried
+            setMigrationAttempted(false);
+          });
+        }
       } else {
         setUser(null);
+        // Reset migration flag when user signs out
+        setMigrationAttempted(false);
       }
       setLoading(false);
     });

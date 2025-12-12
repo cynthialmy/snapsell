@@ -1,20 +1,22 @@
 import * as Clipboard from 'expo-clipboard';
 import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-    Alert,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Switch,
-    Text,
-    TextInput,
-    TouchableOpacity,
-    View,
+  Alert,
+  KeyboardAvoidingView,
+  Platform,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Switch,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -23,9 +25,10 @@ import { LoginGateModal } from '@/components/LoginGateModal';
 import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { QuotaModal } from '@/components/QuotaModal';
 import { SaveSlotsPaywall } from '@/components/SaveSlotsPaywall';
+import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent, trackScreenView } from '@/utils/analytics';
-import type { ListingData } from '@/utils/api';
+import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing, updateListing } from '@/utils/listings';
 import { checkQuota, createListing, getListingById, updateListing as updateListingApi, uploadImage, type UserQuota } from '@/utils/listings-api';
@@ -75,6 +78,12 @@ export default function ListingPreviewScreen() {
   const [showLowSlotsWarning, setShowLowSlotsWarning] = useState(false);
   const [showSaveSuccessToast, setShowSaveSuccessToast] = useState(false);
   const [showBlockedSaveModal, setShowBlockedSaveModal] = useState(false);
+
+  // Image processing state
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
 
   // Auto-save checkbox state
   const [autoSaveListing, setAutoSaveListing] = useState(false);
@@ -133,7 +142,7 @@ export default function ListingPreviewScreen() {
   // Refs for auto-save tracking (declared early so they can be used in useEffects)
   const hasAutoSavedRef = useRef(false);
   const isSavingRef = useRef(false);
-  const autoSaveTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const autoSaveTimerRef = useRef<number | null>(null);
 
   // Refs to track previous values for onBlur tracking
   const prevTitleRef = useRef<string>(listing?.title ?? '');
@@ -361,7 +370,7 @@ export default function ListingPreviewScreen() {
       } else if (!payload && !params.listingId) {
         // No payload and no listingId - show error
         Alert.alert('Upload required', 'Please add an item before opening the preview.', [
-          { text: 'OK', onPress: () => router.replace('/(tabs)/') },
+          { text: 'OK', onPress: () => router.push('/(tabs)/my-listings') },
         ]);
       }
     };
@@ -396,8 +405,9 @@ export default function ListingPreviewScreen() {
       setModifications([]);
       // Reset initial values so they get recalculated for the new listing
       setInitialValues(null);
-      // Reset auto-save ref when new listing is loaded (don't auto-save new listings unless user checks box)
+      // Reset auto-save ref and checkbox state when new listing is loaded (don't auto-save new listings unless user checks box)
       hasAutoSavedRef.current = false;
+      setAutoSaveListing(false);
     }
   }, [payload]);
 
@@ -456,6 +466,7 @@ export default function ListingPreviewScreen() {
 
   // Load saved preferences on mount and when listing changes
   // This ensures preferences (location, pickup, shipping, currency) persist across new listings
+  // IMPORTANT: We do NOT load autoSaveListing preference when listing changes - each new listing starts with unchecked checkbox
   useEffect(() => {
     const loadSavedPreferences = async () => {
       const prefs = await loadPreferences();
@@ -478,10 +489,9 @@ export default function ListingPreviewScreen() {
         if (prefs.currency) {
           setCurrency(prefs.currency);
         }
-        // Load auto-save preference
-        if (prefs.autoSaveListing !== undefined) {
-          setAutoSaveListing(prefs.autoSaveListing);
-        }
+        // DO NOT load auto-save preference when listing changes
+        // Each new listing should start with checkbox unchecked
+        // The preference is only used to remember user's choice, but doesn't auto-check for new listings
       }
 
       // Initialize tracking with initial values after preferences are loaded
@@ -919,12 +929,23 @@ export default function ListingPreviewScreen() {
         // Use existing storage_path if available (image was uploaded during analysis)
         // Otherwise, try to upload the image now
         // Note: payload may not exist when loading from my-listings, so we check it safely
-        let currentStoragePath = storagePath || payload?.storagePath || '';
+        // Also check if payload was just updated (new listing from "add another item")
+        const payloadStoragePath = payload?.storagePath;
+        let currentStoragePath = storagePath || payloadStoragePath || '';
+
+        // If we found a storagePath in payload but not in state, update state
+        if (payloadStoragePath && !storagePath) {
+          console.log('[Listing Save] Updating storagePath state from payload:', payloadStoragePath);
+          setStoragePath(payloadStoragePath);
+          currentStoragePath = payloadStoragePath;
+        }
+
         console.log('[Listing Save] Storage path check:', {
           storagePathState: storagePath,
-          payloadStoragePath: payload?.storagePath,
+          payloadStoragePath: payloadStoragePath,
           currentStoragePath,
           hasImageUri: !!imageUri,
+          hasPayload: !!payload,
         });
 
         // Only try to upload if we don't already have a storage_path
@@ -1181,9 +1202,311 @@ export default function ListingPreviewScreen() {
   };
 
 
+  // Transform technical error messages to cute Snappy messages
+  const transformErrorMessage = (message: string): string => {
+    const lowerMessage = message.toLowerCase();
+
+    if (lowerMessage.includes('timed out') || lowerMessage.includes('timeout')) {
+      const cuteMessages = [
+        "Snappy couldn't wake up because he partied too hard last night...",
+        'Snappy is still snoozing. Give him a moment...',
+        "Snappy is taking a longer nap than expected...",
+        "Snappy is having a deep sleep. Let's try again...",
+      ];
+      return cuteMessages[Math.floor(Math.random() * cuteMessages.length)];
+    }
+
+    if (lowerMessage.includes('warming') || lowerMessage.includes('warmup')) {
+      const cuteMessages = [
+        'Snappy is napping. Waking him up...',
+        'Snappy is stretching his paws...',
+        'Snappy is brewing some coffee...',
+      ];
+      return cuteMessages[Math.floor(Math.random() * cuteMessages.length)];
+    }
+
+    if (lowerMessage.includes('network') || lowerMessage.includes('connection') || lowerMessage.includes('failed to connect')) {
+      return "Snappy can't reach the server right now. Let's try again in a moment...";
+    }
+
+    if (lowerMessage.includes('snappy')) {
+      return message;
+    }
+
+    return message;
+  };
+
+  const navigateToPreview = async (payload: { listing: ListingData; imageUri: string; listingId?: string; storagePath?: string; backendListingId?: string }) => {
+    let listingId: string | undefined = payload.listingId;
+    if (!listingId) {
+      try {
+        const preferences = await loadPreferences();
+        const currency = preferences?.currency || '$';
+        const { saveListing } = await import('@/utils/listings');
+        const savedId = await saveListing(payload.listing, currency, payload.imageUri);
+        listingId = savedId || undefined;
+      } catch (error) {
+        console.error('Failed to save listing:', error);
+      }
+    }
+
+    const params = encodeURIComponent(JSON.stringify({
+      ...payload,
+      listingId,
+    }));
+    router.push({
+      pathname: '/(tabs)/listing-preview',
+      params: { payload: params },
+    });
+  };
+
+  const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
+    setIsAnalyzing(true);
+    setErrorMessage(null);
+
+    try {
+      if (user) {
+        const { quota: currentQuota, error: quotaError } = await checkQuota();
+        trackEvent('quota_checked', {
+          has_quota: !!currentQuota,
+          creations_remaining: currentQuota?.creations_remaining_today,
+          creations_daily_limit: currentQuota?.creations_daily_limit,
+          save_slots_remaining: currentQuota?.save_slots_remaining,
+          is_pro: currentQuota?.is_pro,
+        });
+
+        if (!quotaError && currentQuota && !currentQuota.is_pro && currentQuota.creations_remaining_today === 0) {
+          trackEvent('generate_blocked_no_quota', {
+            creations_remaining: currentQuota.creations_remaining_today,
+            creations_daily_limit: currentQuota.creations_daily_limit,
+          });
+          setIsAnalyzing(false);
+          setShowBlockedModal(true);
+          return;
+        }
+      }
+
+      const preferences = await loadPreferences();
+      const currency = preferences?.currency || '$';
+
+      const { listing, quota: returnedQuota } = await analyzeItemPhoto({
+        uri: asset.uri,
+        filename: asset.fileName ?? 'snapsell-item.jpg',
+        mimeType: asset.mimeType ?? 'image/jpeg',
+        currency,
+        onStatusChange: setErrorMessage,
+      });
+
+      const { formatListingText } = await import('@/utils/listingFormatter');
+      const formattedText = formatListingText({ ...listing, currency });
+      const truncatedText = formattedText.length > 1000
+        ? formattedText.substring(0, 1000)
+        : formattedText;
+
+      trackEvent('listing_generated', {
+        has_title: !!listing.title,
+        has_price: !!listing.price,
+        condition: listing.condition || '',
+        generated_text: truncatedText,
+      });
+
+      let storagePath: string | undefined = undefined;
+      if (user) {
+        try {
+          let base64Image: string | null = null;
+          if (asset.uri.startsWith('data:')) {
+            base64Image = asset.uri;
+          } else {
+            try {
+              const fileInfo = await FileSystem.getInfoAsync(asset.uri);
+              if (fileInfo.exists) {
+                const base64 = await FileSystem.readAsStringAsync(asset.uri, {
+                  encoding: 'base64',
+                });
+                const contentType = asset.mimeType || 'image/jpeg';
+                base64Image = `data:${contentType};base64,${base64}`;
+              }
+            } catch (error) {
+              console.warn('[Image Analysis] Could not convert image to base64:', error);
+            }
+          }
+
+          if (base64Image) {
+            const { data: uploadData, error: uploadError } = await uploadImage(base64Image, asset.mimeType || 'image/jpeg');
+            if (!uploadError && uploadData?.storage_path) {
+              storagePath = uploadData.storage_path;
+            }
+          }
+        } catch (error) {
+          console.warn('[Image Analysis] Error uploading image:', error);
+        }
+      }
+
+      navigateToPreview({ listing, imageUri: asset.uri, storagePath });
+
+      if (user && returnedQuota) {
+        setQuota(returnedQuota);
+        if (!returnedQuota.is_pro && returnedQuota.creations_remaining_today <= 2) {
+          trackEvent('low_quota_nudge_shown', {
+            type: 'creation',
+            remaining: returnedQuota.creations_remaining_today,
+          });
+          setShowLowQuotaNudge(true);
+        }
+      }
+    } catch (error) {
+      const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+      const errorCode = (error as any)?.code;
+
+      if (errorCode === 'QUOTA_EXCEEDED' || rawMessage.includes('QUOTA_EXCEEDED')) {
+        trackEvent('generate_blocked_no_quota', {
+          error_source: 'api',
+        });
+        setIsAnalyzing(false);
+        setShowBlockedModal(true);
+      } else {
+        setErrorMessage(transformErrorMessage(rawMessage));
+      }
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const savePhotoToLibrary = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (Platform.OS === 'web') {
+      return;
+    }
+
+    try {
+      const initialPermission = await MediaLibrary.getPermissionsAsync();
+      let permissionStatus = initialPermission;
+
+      if (!initialPermission.granted) {
+        if (!initialPermission.canAskAgain) {
+          setErrorMessage('Please allow SnapSell to save photos so Snappy can reuse them later.');
+          return;
+        }
+        permissionStatus = await MediaLibrary.requestPermissionsAsync();
+      }
+
+      if (!permissionStatus.granted) {
+        setErrorMessage('Please allow SnapSell to save photos so Snappy can reuse them later.');
+        return;
+      }
+
+      await MediaLibrary.saveToLibraryAsync(asset.uri);
+    } catch (error) {
+      setErrorMessage('Snappy could not save that photo to your library, but the listing still works.');
+    }
+  };
+
+  const handleTakePhoto = async () => {
+    setErrorMessage(null);
+
+    if (Platform.OS === 'web') {
+      Alert.alert('Not available', 'Camera is not available on web. Please use "Choose from Library" instead.');
+      return;
+    }
+
+    try {
+      const permission = await ImagePicker.requestCameraPermissionsAsync();
+
+      if (!permission.granted) {
+        Alert.alert('Permission needed', 'Please allow SnapSell to access your camera.');
+        return;
+      }
+
+      const result = await ImagePicker.launchCameraAsync({
+        mediaTypes: 'images',
+        quality: 0.9,
+        allowsEditing: false,
+      });
+
+      if (result.canceled) {
+        return;
+      }
+
+      const asset = result.assets[0];
+      await savePhotoToLibrary(asset);
+      trackEvent('photo_uploaded', { source: 'camera' });
+      await processImage(asset);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      if (errorMessage.includes('simulator') || errorMessage.includes('not available')) {
+        Alert.alert(
+          'Camera not available',
+          'Camera is not available on simulator. Please use "Choose from Library" or test on a physical device.',
+        );
+      } else {
+        setErrorMessage('Failed to open camera. Please try again or use "Choose from Library".');
+      }
+    }
+  };
+
+  const handleChooseFromLibrary = async () => {
+    setErrorMessage(null);
+
+    const permission =
+      Platform.OS === 'web'
+        ? { granted: true }
+        : await ImagePicker.requestMediaLibraryPermissionsAsync();
+
+    if (!permission.granted) {
+      Alert.alert('Permission needed', 'Please allow SnapSell to access your photos.');
+      return;
+    }
+
+    const result = await ImagePicker.launchImageLibraryAsync({
+      allowsMultipleSelection: false,
+      mediaTypes: 'images',
+      quality: 0.9,
+    });
+
+    if (result.canceled) {
+      return;
+    }
+
+    const asset = result.assets[0];
+    trackEvent('photo_uploaded', { source: 'library' });
+    await processImage(asset);
+  };
+
+  const handlePickImage = () => {
+    if (Platform.OS === 'web') {
+      handleChooseFromLibrary();
+      return;
+    }
+
+    Alert.alert(
+      'Select Photo',
+      'Choose an option',
+      [
+        {
+          text: 'Take Photo',
+          onPress: handleTakePhoto,
+        },
+        {
+          text: 'Choose from Library',
+          onPress: handleChooseFromLibrary,
+        },
+        {
+          text: 'Cancel',
+          style: 'cancel',
+        },
+      ],
+      { cancelable: true },
+    );
+  };
+
   const handleReset = () => {
     setCopySuccess(false);
-    router.replace('/(tabs)/');
+    trackEvent('add_next_item_clicked', { source: 'listing-preview' });
+    handlePickImage();
+  };
+
+  const handleGoToMyListings = () => {
+    trackEvent('go_to_my_listings_clicked', { source: 'listing-preview' });
+    router.push('/(tabs)/my-listings');
   };
 
   const handleLocateMe = async () => {
@@ -1549,10 +1872,26 @@ export default function ListingPreviewScreen() {
             </View>
           )}
 
+          {errorMessage ? (
+            <Text style={styles.error}>{errorMessage}</Text>
+          ) : null}
+
+          {/* Only show "Add next item" button for new listings, not when editing existing ones */}
+          {!backendListingId && (
+            <Pressable
+              onPress={handleReset}
+              style={({ pressed }) => [styles.secondaryButton, pressed ? styles.secondaryButtonPressed : null]}
+              disabled={isAnalyzing}>
+              <Text style={styles.secondaryButtonText}>
+                {isAnalyzing ? 'Creating listing…' : 'Add next item'}
+              </Text>
+            </Pressable>
+          )}
+
           <Pressable
-            onPress={handleReset}
-            style={({ pressed }) => [styles.secondaryButton, pressed ? styles.secondaryButtonPressed : null]}>
-            <Text style={styles.secondaryButtonText}>Add next item</Text>
+            onPress={handleGoToMyListings}
+            style={({ pressed }) => [styles.tertiaryButton, pressed ? styles.tertiaryButtonPressed : null]}>
+            <Text style={styles.tertiaryButtonText}>My Listings</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -1617,6 +1956,38 @@ export default function ListingPreviewScreen() {
           router.push('/(tabs)/upgrade');
         }}
       />
+
+      <SnappyLoading visible={isAnalyzing} />
+      {user && quota && (
+        <>
+          <BlockedQuotaModal
+            visible={showBlockedModal}
+            type="creation"
+            creationsRemaining={quota.creations_remaining_today}
+            creationsDailyLimit={quota.creations_daily_limit}
+            onDismiss={() => setShowBlockedModal(false)}
+            onPurchaseSuccess={() => {
+              setShowBlockedModal(false);
+              // Reload quota
+              checkQuota().then(({ quota: updatedQuota }) => {
+                if (updatedQuota) {
+                  setQuota(updatedQuota);
+                }
+              });
+            }}
+          />
+          <LowSlotsWarning
+            visible={showLowQuotaNudge}
+            remaining={quota.creations_remaining_today}
+            type="creation"
+            onDismiss={() => setShowLowQuotaNudge(false)}
+            onUpgrade={() => {
+              setShowLowQuotaNudge(false);
+              router.push('/(tabs)/upgrade');
+            }}
+          />
+        </>
+      )}
 
       {/* Save Success Toast */}
       {showSaveSuccessToast && quota && (
@@ -2033,5 +2404,32 @@ const styles = StyleSheet.create({
     color: '#166534',
     fontWeight: '600',
     textAlign: 'center',
+  },
+  error: {
+    color: '#D97706',
+    fontSize: 15,
+    fontFamily: Platform.select({
+      ios: 'MarkerFelt-Wide',
+      android: 'casual',
+      default: 'Comic Sans MS',
+    }),
+    lineHeight: 20,
+    marginTop: 8,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  tertiaryButton: {
+    marginTop: 12,
+    paddingVertical: 14,
+    borderRadius: 14,
+    alignItems: 'center',
+  },
+  tertiaryButtonPressed: {
+    opacity: 0.7,
+  },
+  tertiaryButtonText: {
+    color: '#64748B',
+    fontWeight: '600',
+    fontSize: 16,
   },
 });

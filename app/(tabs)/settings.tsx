@@ -222,7 +222,9 @@ export default function SettingsScreen() {
                 router.push('/profile');
               }}
               style={styles.sectionButton}>
-              <Text style={styles.sectionButtonText}>Profile</Text>
+              <Text style={styles.sectionButtonText}>
+                {(user as any)?.display_name || user.email?.split('@')[0] || 'Profile'}
+              </Text>
               <Text style={styles.sectionButtonArrow}>→</Text>
             </Pressable>
           </View>

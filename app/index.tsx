@@ -75,7 +75,7 @@ export default function HomeScreen() {
   const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
 
   const ctaLabel = useMemo(
-    () => (isAnalyzing ? 'Analyzing photo…' : 'Snap / Upload Item'),
+    () => (isAnalyzing ? 'Creating listing…' : 'Create Listing'),
     [isAnalyzing],
   );
 
@@ -385,17 +385,6 @@ export default function HomeScreen() {
     });
   };
 
-  const sampleListing: ListingData = {
-    title: 'IKEA mid-century oak chair',
-    price: '85',
-    condition: 'Used - Good',
-    location: 'Oslo, Norway',
-    description: 'Beautiful vintage oak chair in excellent condition. Perfect for a dining room or home office. Minor wear consistent with age, but structurally sound and comfortable.',
-    pickupAvailable: true,
-    shippingAvailable: false,
-    pickupNotes: '',
-  };
-
   // Load quota
   const loadQuota = useCallback(async () => {
     if (!user) {
@@ -440,11 +429,6 @@ export default function HomeScreen() {
     }, [loadQuota, user]),
   );
 
-  const sampleListingText = useMemo(
-    () => formatListingText({ ...sampleListing, currency: '$' }),
-    [],
-  );
-
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <StatusBar barStyle="dark-content" />
@@ -485,26 +469,22 @@ export default function HomeScreen() {
               </Text>
             </View>
           </View>
+        </View>
 
-          <View style={styles.ctaSection}>
-            <Pressable
-              accessibilityRole="button"
-              onPress={handlePickImage}
-              style={({ pressed }) => [
-                styles.primaryButton,
-                pressed && !isAnalyzing ? styles.primaryButtonPressed : null,
-              ]}
-              disabled={isAnalyzing}>
-              <Text style={styles.primaryButtonText}>{ctaLabel}</Text>
-            </Pressable>
+        <View style={styles.ctaSection}>
+          <Pressable
+            accessibilityRole="button"
+            onPress={handlePickImage}
+            style={({ pressed }) => [
+              styles.primaryButton,
+              pressed && !isAnalyzing ? styles.primaryButtonPressed : null,
+            ]}
+            disabled={isAnalyzing}>
+            <Text style={styles.primaryButtonIcon}>+</Text>
+            <Text style={styles.primaryButtonText}>{ctaLabel}</Text>
+          </Pressable>
 
-            {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
-          </View>
-
-          <View style={styles.samplePreviewCard}>
-            <Text style={styles.samplePreviewLabel}>Sample listing:</Text>
-            <Text style={styles.samplePreviewText}>{sampleListingText}</Text>
-          </View>
+          {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
         </View>
       </ScrollView>
       <SnappyLoading visible={isAnalyzing} />
@@ -546,6 +526,7 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 48,
     gap: 16,
+    flexGrow: 1,
   },
   header: {
     flexDirection: 'row',
@@ -581,12 +562,29 @@ const styles = StyleSheet.create({
   },
   primaryButton: {
     backgroundColor: '#111827',
-    paddingVertical: 16,
-    borderRadius: 999,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 32,
+    borderRadius: 999,
+    minWidth: 200,
+    gap: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   primaryButtonPressed: {
     opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  primaryButtonIcon: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#FFFFFF',
+    lineHeight: 28,
   },
   primaryButtonText: {
     color: '#FFFFFF',
@@ -606,38 +604,6 @@ const styles = StyleSheet.create({
   steps: {
     marginTop: 8,
     gap: 12,
-  },
-  samplePreviewCard: {
-    backgroundColor: '#EFF6FF',
-    borderRadius: 14,
-    padding: 18,
-    marginTop: 8,
-    alignSelf: 'stretch',
-    borderWidth: 1,
-    borderColor: '#BFDBFE',
-    shadowColor: '#93C5FD',
-    shadowOpacity: 0.25,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 2,
-  },
-  samplePreviewLabel: {
-    fontSize: 12,
-    color: '#64748B',
-    fontWeight: '600',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  samplePreviewText: {
-    fontSize: 15,
-    color: '#1F2937',
-    lineHeight: 22,
-    fontFamily: Platform.select({
-      ios: 'MarkerFelt-Wide',
-      android: 'casual',
-      default: 'Comic Sans MS',
-    }),
   },
   mascotCard: {
     flexDirection: 'row',
@@ -678,6 +644,7 @@ const styles = StyleSheet.create({
   },
   ctaSection: {
     gap: 12,
+    marginTop: 48,
   },
   quotaCard: {
     backgroundColor: '#EFF6FF',
