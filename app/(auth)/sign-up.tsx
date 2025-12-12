@@ -15,7 +15,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent, trackScreenView } from '@/utils/analytics';
-import { signUp } from '@/utils/auth';
+import { signInWithApple, signInWithGoogle, signUp } from '@/utils/auth';
 
 export default function SignUpScreen() {
   const router = useRouter();
@@ -24,6 +24,8 @@ export default function SignUpScreen() {
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(
@@ -93,6 +95,70 @@ export default function SignUpScreen() {
     }
   };
 
+  const handleGoogleSignUp = async () => {
+    setGoogleLoading(true);
+    setError(null);
+    trackEvent('sign_up_attempted', { method: 'google' });
+
+    const { data, error: googleError } = await signInWithGoogle();
+
+    setGoogleLoading(false);
+
+    if (googleError) {
+      // Don't show error if user cancelled
+      if (googleError.message !== 'Sign in cancelled') {
+        trackEvent('sign_up_failed', {
+          method: 'google',
+          error: googleError.message || 'Unknown error',
+        });
+        setError(googleError.message || 'Failed to sign up with Google. Please try again.');
+      } else {
+        trackEvent('sign_up_cancelled', { method: 'google' });
+      }
+      return;
+    }
+
+    // OAuth flow completed - deep link handler will process the callback
+    // and navigate the user. We just track success here.
+    trackEvent('sign_up_succeeded', { method: 'google' });
+  };
+
+  const handleAppleSignUp = async () => {
+    setAppleLoading(true);
+    setError(null);
+    trackEvent('sign_up_attempted', { method: 'apple' });
+
+    const { data, error: appleError } = await signInWithApple();
+
+    setAppleLoading(false);
+
+    if (appleError) {
+      // Don't show error if user cancelled
+      if (appleError.message !== 'Sign in cancelled') {
+        trackEvent('sign_up_failed', {
+          method: 'apple',
+          error: appleError.message || 'Unknown error',
+        });
+        setError(appleError.message || 'Failed to sign up with Apple. Please try again.');
+      } else {
+        trackEvent('sign_up_cancelled', { method: 'apple' });
+      }
+      return;
+    }
+
+    if (data?.user) {
+      trackEvent('sign_up_succeeded', { method: 'apple' });
+      Alert.alert(
+        'Account created',
+        'Your account has been created successfully!',
+        [{ text: 'OK', onPress: () => router.replace('/(tabs)') }]
+      );
+    } else {
+      // OAuth flow completed - deep link handler will process the callback
+      trackEvent('sign_up_succeeded', { method: 'apple' });
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView
@@ -113,7 +179,7 @@ export default function SignUpScreen() {
                 placeholder="Your name"
                 autoCapitalize="words"
                 style={styles.input}
-                editable={!loading}
+                editable={!loading && !googleLoading && !appleLoading}
               />
             </View>
 
@@ -127,7 +193,7 @@ export default function SignUpScreen() {
                 autoCapitalize="none"
                 autoComplete="email"
                 style={styles.input}
-                editable={!loading}
+                editable={!loading && !googleLoading && !appleLoading}
               />
             </View>
 
@@ -141,21 +207,53 @@ export default function SignUpScreen() {
                 autoCapitalize="none"
                 autoComplete="password-new"
                 style={styles.input}
-                editable={!loading}
+                editable={!loading && !googleLoading && !appleLoading}
               />
             </View>
 
             <Pressable
               onPress={handleSignUp}
-              disabled={loading}
+              disabled={loading || googleLoading || appleLoading}
               style={({ pressed }) => [
                 styles.primaryButton,
-                (loading || pressed) && styles.primaryButtonDisabled,
+                (loading || googleLoading || appleLoading || pressed) && styles.primaryButtonDisabled,
               ]}>
               <Text style={styles.primaryButtonText}>
                 {loading ? 'Creating account...' : 'Sign up'}
               </Text>
             </Pressable>
+
+            <View style={styles.divider}>
+              <View style={styles.dividerLine} />
+              <Text style={styles.dividerText}>or</Text>
+              <View style={styles.dividerLine} />
+            </View>
+
+            <Pressable
+              onPress={handleGoogleSignUp}
+              disabled={loading || googleLoading || appleLoading}
+              style={({ pressed }) => [
+                styles.oauthButton,
+                (loading || googleLoading || appleLoading || pressed) && styles.oauthButtonDisabled,
+              ]}>
+              <Text style={styles.oauthButtonText}>
+                {googleLoading ? 'Signing up...' : 'Continue with Google'}
+              </Text>
+            </Pressable>
+
+            {Platform.OS === 'ios' && (
+              <Pressable
+                onPress={handleAppleSignUp}
+                disabled={loading || googleLoading || appleLoading}
+                style={({ pressed }) => [
+                  styles.oauthButton,
+                  (loading || googleLoading || appleLoading || pressed) && styles.oauthButtonDisabled,
+                ]}>
+                <Text style={styles.oauthButtonText}>
+                  {appleLoading ? 'Signing up...' : 'Continue with Apple'}
+                </Text>
+              </Pressable>
+            )}
 
             <View style={styles.footer}>
               <Text style={styles.footerText}>Already have an account? </Text>
@@ -249,6 +347,37 @@ const styles = StyleSheet.create({
   footerLink: {
     color: '#4338CA',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  divider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 8,
+  },
+  dividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#E2E8F0',
+  },
+  dividerText: {
+    marginHorizontal: 16,
+    color: '#64748B',
+    fontSize: 14,
+  },
+  oauthButton: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+  },
+  oauthButtonDisabled: {
+    opacity: 0.5,
+  },
+  oauthButtonText: {
+    color: '#0F172A',
+    fontSize: 16,
     fontWeight: '600',
   },
 });

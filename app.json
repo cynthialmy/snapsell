@@ -74,7 +74,8 @@
           "locationAlwaysAndWhenInUsePermission": "SnapSell needs access to your location to automatically fill in your location for listings.",
           "locationWhenInUsePermission": "SnapSell needs access to your location to automatically fill in your location for listings."
         }
-      ]
+      ],
+      "expo-apple-authentication"
     ],
     "experiments": {
       "typedRoutes": true,

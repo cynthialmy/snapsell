@@ -5,7 +5,10 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import * as AppleAuthentication from 'expo-apple-authentication';
 import * as SecureStore from 'expo-secure-store';
+import * as WebBrowser from 'expo-web-browser';
+import { Platform } from 'react-native';
 
 // Initialize Supabase client
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
@@ -110,6 +113,134 @@ export async function signInWithMagicLink(email: string) {
     return { data, error: null };
   } catch (error: any) {
     console.error('Magic link error:', error);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Sign in with Google OAuth
+ * Opens Supabase OAuth URL in web browser, redirects back to app via deep link
+ */
+export async function signInWithGoogle() {
+  try {
+    // Get deep link scheme from environment or use default
+    const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
+    const redirectTo = `${deepLinkScheme}://auth/callback`;
+
+    // Construct Supabase OAuth URL
+    const authUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to=${encodeURIComponent(redirectTo)}`;
+
+    // Open OAuth URL in browser
+    const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectTo);
+
+    if (result.type === 'cancel') {
+      return { data: null, error: { message: 'Sign in cancelled' } };
+    }
+
+    if (result.type === 'success' && result.url) {
+      // The deep link handler in _layout.tsx will process the callback
+      // Extract tokens from URL to verify the flow started
+      const url = result.url;
+      const hashIndex = url.indexOf('#');
+
+      if (hashIndex !== -1) {
+        const hashFragment = url.substring(hashIndex + 1);
+        const hashParams = new URLSearchParams(hashFragment);
+        const accessToken = hashParams.get('access_token');
+
+        if (accessToken) {
+          // Session will be set by the deep link handler
+          // Return success to indicate OAuth flow completed
+          return { data: { user: null }, error: null };
+        }
+      }
+
+      // If we get here, the callback was received but tokens weren't in the URL
+      // The deep link handler should have processed it, so return success
+      return { data: { user: null }, error: null };
+    }
+
+    return { data: null, error: { message: 'OAuth flow failed' } };
+  } catch (error: any) {
+    console.error('Google sign in error:', error);
+    return { data: null, error };
+  }
+}
+
+/**
+ * Sign in with Apple OAuth
+ * iOS: Uses native Sign in with Apple, then exchanges credential with Supabase
+ * Android: Falls back to web-based OAuth (same as Google)
+ */
+export async function signInWithApple() {
+  try {
+    // Get deep link scheme from environment or use default
+    const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
+    const redirectTo = `${deepLinkScheme}://auth/callback`;
+
+    if (Platform.OS === 'ios') {
+      // Use native Sign in with Apple on iOS
+      try {
+        const credential = await AppleAuthentication.signInAsync({
+          requestedScopes: [
+            AppleAuthentication.AppleAuthenticationScope.FULL_NAME,
+            AppleAuthentication.AppleAuthenticationScope.EMAIL,
+          ],
+        });
+
+        if (!credential.identityToken) {
+          return { data: null, error: { message: 'Apple sign in failed: no identity token' } };
+        }
+
+        // Exchange Apple credential with Supabase
+        const { data, error } = await supabase.auth.signInWithIdToken({
+          provider: 'apple',
+          token: credential.identityToken,
+          nonce: credential.nonce || undefined,
+        });
+
+        if (error) throw error;
+
+        return { data, error: null };
+      } catch (error: any) {
+        // Handle user cancellation
+        if (error.code === 'ERR_REQUEST_CANCELED') {
+          return { data: null, error: { message: 'Sign in cancelled' } };
+        }
+        throw error;
+      }
+    } else {
+      // Android: Use web-based OAuth (same as Google)
+      const authUrl = `${SUPABASE_URL}/auth/v1/authorize?provider=apple&redirect_to=${encodeURIComponent(redirectTo)}`;
+
+      const result = await WebBrowser.openAuthSessionAsync(authUrl, redirectTo);
+
+      if (result.type === 'cancel') {
+        return { data: null, error: { message: 'Sign in cancelled' } };
+      }
+
+      if (result.type === 'success' && result.url) {
+        // The deep link handler in _layout.tsx will process the callback
+        const url = result.url;
+        const hashIndex = url.indexOf('#');
+
+        if (hashIndex !== -1) {
+          const hashFragment = url.substring(hashIndex + 1);
+          const hashParams = new URLSearchParams(hashFragment);
+          const accessToken = hashParams.get('access_token');
+
+          if (accessToken) {
+            return { data: { user: null }, error: null };
+          }
+        }
+
+        return { data: { user: null }, error: null };
+      }
+
+      return { data: null, error: { message: 'OAuth flow failed' } };
+    }
+  } catch (error: any) {
+    console.error('Apple sign in error:', error);
     return { data: null, error };
   }
 }

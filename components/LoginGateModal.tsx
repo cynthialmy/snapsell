@@ -1,9 +1,10 @@
 import { useRouter } from 'expo-router';
-import React from 'react';
+import React, { useState } from 'react';
 import { Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { trackEvent } from '@/utils/analytics';
+import { signInWithApple, signInWithGoogle } from '@/utils/auth';
 
 interface LoginGateModalProps {
   visible: boolean;
@@ -21,6 +22,8 @@ export function LoginGateModal({
   context = 'save',
 }: LoginGateModalProps) {
   const router = useRouter();
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
 
   // Track when modal is shown
   React.useEffect(() => {
@@ -40,28 +43,65 @@ export function LoginGateModal({
     });
   };
 
-  const handleAppleLogin = () => {
+  const handleAppleLogin = async () => {
     trackEvent('login_method_selected', { method: 'apple', context });
     onLoginMethod('apple');
-    // TODO: Implement Sign in with Apple
-    // For now, navigate to sign-in screen
-    onDismiss();
-    router.push({
-      pathname: '/(auth)/sign-in',
-      params: { returnTo: '/(tabs)/listing-preview' },
-    });
+    setAppleLoading(true);
+    onDismiss(); // Dismiss modal immediately, OAuth flow will handle navigation
+
+    const { data, error: appleError } = await signInWithApple();
+    setAppleLoading(false);
+
+    if (appleError) {
+      // Don't show error if user cancelled
+      if (appleError.message !== 'Sign in cancelled') {
+        trackEvent('login_gate_oauth_failed', {
+          method: 'apple',
+          context,
+          error: appleError.message || 'Unknown error',
+        });
+      } else {
+        trackEvent('login_gate_oauth_cancelled', { method: 'apple', context });
+      }
+      return;
+    }
+
+    // OAuth flow completed - deep link handler will process the callback and navigate
+    // For native Apple sign-in on iOS, if we have a user, navigate immediately
+    if (data?.user) {
+      trackEvent('login_gate_oauth_succeeded', { method: 'apple', context });
+      // Navigation will be handled by auth state change in AuthContext
+    } else {
+      trackEvent('login_gate_oauth_succeeded', { method: 'apple', context });
+      // Deep link handler will process the callback
+    }
   };
 
-  const handleGoogleLogin = () => {
+  const handleGoogleLogin = async () => {
     trackEvent('login_method_selected', { method: 'google', context });
     onLoginMethod('google');
-    // TODO: Implement Google OAuth
-    // For now, navigate to sign-in screen
-    onDismiss();
-    router.push({
-      pathname: '/(auth)/sign-in',
-      params: { returnTo: '/(tabs)/listing-preview' },
-    });
+    setGoogleLoading(true);
+    onDismiss(); // Dismiss modal immediately, OAuth flow will handle navigation
+
+    const { data, error: googleError } = await signInWithGoogle();
+    setGoogleLoading(false);
+
+    if (googleError) {
+      // Don't show error if user cancelled
+      if (googleError.message !== 'Sign in cancelled') {
+        trackEvent('login_gate_oauth_failed', {
+          method: 'google',
+          context,
+          error: googleError.message || 'Unknown error',
+        });
+      } else {
+        trackEvent('login_gate_oauth_cancelled', { method: 'google', context });
+      }
+      return;
+    }
+
+    // OAuth flow completed - deep link handler will process the callback and navigate
+    trackEvent('login_gate_oauth_succeeded', { method: 'google', context });
   };
 
   const handleJustCopy = () => {
@@ -111,21 +151,27 @@ export function LoginGateModal({
               {Platform.OS === 'ios' && (
                 <Pressable
                   onPress={handleAppleLogin}
+                  disabled={googleLoading || appleLoading}
                   style={({ pressed }) => [
                     styles.secondaryButton,
-                    pressed && styles.secondaryButtonPressed,
+                    (googleLoading || appleLoading || pressed) && styles.secondaryButtonPressed,
                   ]}>
-                  <Text style={styles.secondaryButtonText}>Continue with Apple</Text>
+                  <Text style={styles.secondaryButtonText}>
+                    {appleLoading ? 'Signing in...' : 'Continue with Apple'}
+                  </Text>
                 </Pressable>
               )}
 
               <Pressable
                 onPress={handleGoogleLogin}
+                disabled={googleLoading || appleLoading}
                 style={({ pressed }) => [
                   styles.secondaryButton,
-                  pressed && styles.secondaryButtonPressed,
+                  (googleLoading || appleLoading || pressed) && styles.secondaryButtonPressed,
                 ]}>
-                <Text style={styles.secondaryButtonText}>Continue with Google</Text>
+                <Text style={styles.secondaryButtonText}>
+                  {googleLoading ? 'Signing in...' : 'Continue with Google'}
+                </Text>
               </Pressable>
             </View>
 

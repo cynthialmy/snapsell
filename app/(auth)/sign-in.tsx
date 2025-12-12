@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { trackEvent, trackScreenView } from '@/utils/analytics';
-import { signIn, signInWithMagicLink } from '@/utils/auth';
+import { signIn, signInWithApple, signInWithGoogle, signInWithMagicLink } from '@/utils/auth';
 
 export default function SignInScreen() {
   const router = useRouter();
@@ -23,6 +23,8 @@ export default function SignInScreen() {
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [magicLinkLoading, setMagicLinkLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
+  const [appleLoading, setAppleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useFocusEffect(
@@ -95,6 +97,71 @@ export default function SignInScreen() {
     }
   };
 
+  const handleGoogleSignIn = async () => {
+    setGoogleLoading(true);
+    setError(null);
+    trackEvent('sign_in_attempted', { method: 'google' });
+
+    const { data, error: googleError } = await signInWithGoogle();
+
+    setGoogleLoading(false);
+
+    if (googleError) {
+      // Don't show error if user cancelled
+      if (googleError.message !== 'Sign in cancelled') {
+        trackEvent('sign_in_failed', {
+          method: 'google',
+          error: googleError.message || 'Unknown error',
+        });
+        setError(googleError.message || 'Failed to sign in with Google. Please try again.');
+      } else {
+        trackEvent('sign_in_cancelled', { method: 'google' });
+      }
+      return;
+    }
+
+    // OAuth flow completed - deep link handler will process the callback
+    // and navigate the user. We just track success here.
+    trackEvent('sign_in_succeeded', { method: 'google' });
+  };
+
+  const handleAppleSignIn = async () => {
+    setAppleLoading(true);
+    setError(null);
+    trackEvent('sign_in_attempted', { method: 'apple' });
+
+    const { data, error: appleError } = await signInWithApple();
+
+    setAppleLoading(false);
+
+    if (appleError) {
+      // Don't show error if user cancelled
+      if (appleError.message !== 'Sign in cancelled') {
+        trackEvent('sign_in_failed', {
+          method: 'apple',
+          error: appleError.message || 'Unknown error',
+        });
+        setError(appleError.message || 'Failed to sign in with Apple. Please try again.');
+      } else {
+        trackEvent('sign_in_cancelled', { method: 'apple' });
+      }
+      return;
+    }
+
+    if (data?.user) {
+      trackEvent('sign_in_succeeded', { method: 'apple' });
+      // If we came from listing preview, go back there; otherwise go to tabs
+      if (params.returnTo) {
+        router.replace(params.returnTo as any);
+      } else {
+        router.replace('/(tabs)');
+      }
+    } else {
+      // OAuth flow completed - deep link handler will process the callback
+      trackEvent('sign_in_succeeded', { method: 'apple' });
+    }
+  };
+
   const handleClose = () => {
     // If there's a returnTo param, go to that route
     if (params.returnTo) {
@@ -132,7 +199,7 @@ export default function SignInScreen() {
                 autoCapitalize="none"
                 autoComplete="email"
                 style={styles.input}
-                editable={!loading && !magicLinkLoading}
+                editable={!loading && !magicLinkLoading && !googleLoading && !appleLoading}
               />
             </View>
 
@@ -146,16 +213,16 @@ export default function SignInScreen() {
                 autoCapitalize="none"
                 autoComplete="password"
                 style={styles.input}
-                editable={!loading && !magicLinkLoading}
+                editable={!loading && !magicLinkLoading && !googleLoading && !appleLoading}
               />
             </View>
 
             <Pressable
               onPress={handleSignIn}
-              disabled={loading || magicLinkLoading}
+              disabled={loading || magicLinkLoading || googleLoading || appleLoading}
               style={({ pressed }) => [
                 styles.primaryButton,
-                (loading || magicLinkLoading || pressed) && styles.primaryButtonDisabled,
+                (loading || magicLinkLoading || googleLoading || appleLoading || pressed) && styles.primaryButtonDisabled,
               ]}>
               <Text style={styles.primaryButtonText}>
                 {loading ? 'Signing in...' : 'Sign in'}
@@ -169,11 +236,37 @@ export default function SignInScreen() {
             </View>
 
             <Pressable
+              onPress={handleGoogleSignIn}
+              disabled={loading || magicLinkLoading || googleLoading || appleLoading}
+              style={({ pressed }) => [
+                styles.oauthButton,
+                (loading || magicLinkLoading || googleLoading || appleLoading || pressed) && styles.oauthButtonDisabled,
+              ]}>
+              <Text style={styles.oauthButtonText}>
+                {googleLoading ? 'Signing in...' : 'Continue with Google'}
+              </Text>
+            </Pressable>
+
+            {Platform.OS === 'ios' && (
+              <Pressable
+                onPress={handleAppleSignIn}
+                disabled={loading || magicLinkLoading || googleLoading || appleLoading}
+                style={({ pressed }) => [
+                  styles.oauthButton,
+                  (loading || magicLinkLoading || googleLoading || appleLoading || pressed) && styles.oauthButtonDisabled,
+                ]}>
+                <Text style={styles.oauthButtonText}>
+                  {appleLoading ? 'Signing in...' : 'Continue with Apple'}
+                </Text>
+              </Pressable>
+            )}
+
+            <Pressable
               onPress={handleMagicLink}
-              disabled={loading || magicLinkLoading}
+              disabled={loading || magicLinkLoading || googleLoading || appleLoading}
               style={({ pressed }) => [
                 styles.secondaryButton,
-                (loading || magicLinkLoading || pressed) && styles.secondaryButtonDisabled,
+                (loading || magicLinkLoading || googleLoading || appleLoading || pressed) && styles.secondaryButtonDisabled,
               ]}>
               <Text style={styles.secondaryButtonText}>
                 {magicLinkLoading ? 'Sending...' : 'Sign in with magic link'}
@@ -323,6 +416,22 @@ const styles = StyleSheet.create({
   footerLink: {
     color: '#4338CA',
     fontSize: 14,
+    fontWeight: '600',
+  },
+  oauthButton: {
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    backgroundColor: '#F8FAFC',
+  },
+  oauthButtonDisabled: {
+    opacity: 0.5,
+  },
+  oauthButtonText: {
+    color: '#0F172A',
+    fontSize: 16,
     fontWeight: '600',
   },
 });
