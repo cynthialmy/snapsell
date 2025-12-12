@@ -11,19 +11,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent, trackScreenView } from '@/utils/analytics';
-import { checkQuota } from '@/utils/listings-api';
+import { checkQuota, type UserQuota } from '@/utils/listings-api';
 import { getPaymentHistory, type PaymentHistoryItem } from '@/utils/payments';
-
-interface Quota {
-  used: number;
-  limit: number;
-  remaining: number;
-}
 
 export default function UpgradeScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const [quota, setQuota] = useState<Quota | null>(null);
+  const [quota, setQuota] = useState<UserQuota | null>(null);
   const [loading, setLoading] = useState(true);
   const [paymentHistory, setPaymentHistory] = useState<PaymentHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -39,11 +33,18 @@ export default function UpgradeScreen() {
       const { quota: userQuota, error } = await checkQuota();
       if (error) {
         console.error('Error loading quota:', error);
+        // If it's a 500 error, it's a backend issue - don't show quota but don't block the UI
+        if (error.status === 500) {
+          console.warn('Backend quota endpoint is returning 500 error. This is a backend SQL issue that needs to be fixed.');
+        }
+        // Set quota to null so UI doesn't show incorrect data
+        setQuota(null);
       } else {
         setQuota(userQuota);
       }
     } catch (error) {
       console.error('Error loading quota:', error);
+      setQuota(null);
     } finally {
       setLoading(false);
     }
@@ -100,12 +101,28 @@ export default function UpgradeScreen() {
         {quota && (
           <View style={styles.quotaCard}>
             <Text style={styles.quotaTitle}>Current Usage</Text>
-            <Text style={styles.quotaText}>
-              {quota.used} / {quota.limit} listings used
-            </Text>
-            <Text style={styles.quotaSubtext}>
-              {quota.remaining} remaining
-            </Text>
+            {quota.is_pro ? (
+              <>
+                <Text style={styles.quotaText}>Pro Member</Text>
+                <Text style={styles.quotaSubtext}>
+                  Unlimited creations and Save Slots
+                </Text>
+              </>
+            ) : (
+              <>
+                <Text style={styles.quotaText}>
+                  Creations: {quota.creations_remaining_today} / {quota.creations_daily_limit} left today
+                </Text>
+                <Text style={styles.quotaSubtext}>
+                  Save Slots: {quota.save_slots_remaining} remaining
+                </Text>
+                {quota.bonus_creations_remaining > 0 && (
+                  <Text style={styles.quotaSubtext}>
+                    Bonus creations: {quota.bonus_creations_remaining} remaining
+                  </Text>
+                )}
+              </>
+            )}
 
             {/* Collapsible "What are Save Slots?" section */}
             <Pressable

@@ -2,20 +2,20 @@ import * as Linking from 'expo-linking';
 import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
-  Alert,
-  Modal,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  useWindowDimensions,
-  View,
+    Alert,
+    Modal,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    useWindowDimensions,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent } from '@/utils/analytics';
-import { initiateCreditPurchase, initiateProSubscription } from '@/utils/payments';
+import { initiatePackPurchase, initiateProSubscription } from '@/utils/payments';
 
 interface PurchaseSheetProps {
   visible: boolean;
@@ -48,11 +48,11 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
     onDismiss();
   };
 
-  const handlePurchaseSlots = async (slots: 10 | 25 | 60) => {
+  const handlePurchasePack = async (sku: 'credits_10' | 'credits_25' | 'credits_60') => {
     if (!user) {
       Alert.alert(
         'Account required',
-        'You need to create an account to purchase Save Slots or upgrade. Sign in to continue.',
+        'You need to create an account to purchase packs or upgrade. Sign in to continue.',
         [
           { text: 'Cancel', style: 'cancel' },
           {
@@ -70,26 +70,22 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
     setProcessing(true);
     try {
       // Track purchase initiation
-      trackEvent('purchase_initiated', {
-        product_type: 'save_slots',
-        product_id: slots.toString(),
-        amount: slots,
-      });
+      trackEvent('tap_buy_pack', { sku });
 
       // Use deep links directly for Stripe redirects
       const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
       const successUrl = `${deepLinkScheme}://payment/success?session_id={CHECKOUT_SESSION_ID}`;
       const cancelUrl = `${deepLinkScheme}://payment/cancel`;
 
-      const checkoutUrl = await initiateCreditPurchase(slots, {
+      const { checkout_url } = await initiatePackPurchase(sku, {
         successUrl,
         cancelUrl,
       });
 
       // Open Stripe checkout in browser
-      const canOpen = await Linking.canOpenURL(checkoutUrl);
+      const canOpen = await Linking.canOpenURL(checkout_url);
       if (canOpen) {
-        await Linking.openURL(checkoutUrl);
+        await Linking.openURL(checkout_url);
         onDismiss();
         Alert.alert(
           'Payment Started',
@@ -100,9 +96,8 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
         Alert.alert('Error', 'Cannot open payment URL');
       }
     } catch (error: any) {
-      trackEvent('purchase_failed', {
-        product_type: 'save_slots',
-        product_id: slots.toString(),
+      trackEvent('pack_purchase_failed', {
+        sku,
         error: error.message || 'Unknown error',
       });
       Alert.alert('Error', error.message || 'Failed to start payment. Please try again.');
@@ -199,25 +194,47 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
                 showsVerticalScrollIndicator={true}
                 bounces={true}
                 nestedScrollEnabled={true}>
-              {/* Save Slot Packs */}
+              {/* Pack Options */}
               <View style={styles.section}>
-                <Text style={styles.sectionTitle}>Save Slot Packs</Text>
+                <Text style={styles.sectionTitle}>Pack Options</Text>
                 <Text style={styles.sectionDescription}>
-                  Purchase additional Save Slots to save more listings
+                  Purchase packs to add both creations and Save Slots
                 </Text>
 
                 <View style={styles.productCard}>
                   <View style={styles.productInfo}>
-                    <Text style={styles.productName}>10 Save Slots</Text>
+                    <Text style={styles.productName}>10-Pack</Text>
                     <Text style={styles.productDescription}>
-                      Save 10 listings to your account. Save Slots never expire and can be used anytime.
+                      Adds +10 creations & +10 saves
                     </Text>
-                    <Text style={styles.productNote}>
-                      Creating listings is always free. Save Slots are only used when you save a listing.
-                    </Text>
+                    <Text style={styles.productPrice}>$2.99</Text>
                   </View>
                   <Pressable
-                    onPress={() => handlePurchaseSlots(10)}
+                    onPress={() => handlePurchasePack('credits_10')}
+                    disabled={processing}
+                    style={({ pressed }) => [
+                      styles.purchaseButton,
+                      (processing || pressed) && styles.purchaseButtonDisabled,
+                    ]}>
+                    <Text style={styles.purchaseButtonText}>
+                      {processing ? 'Processing...' : 'Purchase'}
+                    </Text>
+                  </Pressable>
+                </View>
+
+                <View style={[styles.productCard, styles.popularCard]}>
+                  <View style={styles.popularBadge}>
+                    <Text style={styles.popularBadgeText}>Most popular</Text>
+                  </View>
+                  <View style={styles.productInfo}>
+                    <Text style={styles.productName}>25-Pack</Text>
+                    <Text style={styles.productDescription}>
+                      Adds +25 creations & +25 saves
+                    </Text>
+                    <Text style={styles.productPrice}>$5.99</Text>
+                  </View>
+                  <Pressable
+                    onPress={() => handlePurchasePack('credits_25')}
                     disabled={processing}
                     style={({ pressed }) => [
                       styles.purchaseButton,
@@ -231,39 +248,15 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
 
                 <View style={styles.productCard}>
                   <View style={styles.productInfo}>
-                    <Text style={styles.productName}>25 Save Slots</Text>
+                    <Text style={styles.productName}>60-Pack</Text>
                     <Text style={styles.productDescription}>
-                      Save 25 listings to your account. Save Slots never expire and can be used anytime.
+                      Adds +60 creations & +60 saves
                     </Text>
-                    <Text style={styles.productNote}>
-                      Creating listings is always free. Save Slots are only used when you save a listing.
-                    </Text>
+                    <Text style={styles.productPrice}>$12.99</Text>
+                    <Text style={styles.productNote}>Best value</Text>
                   </View>
                   <Pressable
-                    onPress={() => handlePurchaseSlots(25)}
-                    disabled={processing}
-                    style={({ pressed }) => [
-                      styles.purchaseButton,
-                      (processing || pressed) && styles.purchaseButtonDisabled,
-                    ]}>
-                    <Text style={styles.purchaseButtonText}>
-                      {processing ? 'Processing...' : 'Purchase'}
-                    </Text>
-                  </Pressable>
-                </View>
-
-                <View style={styles.productCard}>
-                  <View style={styles.productInfo}>
-                    <Text style={styles.productName}>60 Save Slots</Text>
-                    <Text style={styles.productDescription}>
-                      Save 60 listings to your account. Save Slots never expire and can be used anytime.
-                    </Text>
-                    <Text style={styles.productNote}>
-                      Creating listings is always free. Save Slots are only used when you save a listing.
-                    </Text>
-                  </View>
-                  <Pressable
-                    onPress={() => handlePurchaseSlots(60)}
+                    onPress={() => handlePurchasePack('credits_60')}
                     disabled={processing}
                     style={({ pressed }) => [
                       styles.purchaseButton,
@@ -280,14 +273,14 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Subscription Plans</Text>
                 <Text style={styles.sectionDescription}>
-                  Get unlimited Save Slots with a subscription
+                  Get unlimited creations and Save Slots with a subscription
                 </Text>
 
                 <View style={styles.productCard}>
                   <View style={styles.productInfo}>
                     <Text style={styles.productName}>Pro Monthly</Text>
                     <Text style={styles.productDescription}>
-                      Unlimited Save Slots forever. Save as many listings as you want, no limits.
+                      Unlimited creations and Save Slots forever. No limits.
                     </Text>
                     <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
                   </View>
@@ -308,7 +301,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
                   <View style={styles.productInfo}>
                     <Text style={styles.productName}>Pro Yearly</Text>
                     <Text style={styles.productDescription}>
-                      Unlimited Save Slots forever. Best value for frequent sellers.
+                      Unlimited creations and Save Slots forever. Best value for frequent sellers.
                     </Text>
                     <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
                   </View>
@@ -425,6 +418,34 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     borderWidth: 1,
     borderColor: '#E2E8F0',
+    position: 'relative',
+  },
+  popularCard: {
+    borderColor: '#4338CA',
+    borderWidth: 2,
+    backgroundColor: '#F8FAFC',
+  },
+  popularBadge: {
+    position: 'absolute',
+    top: -10,
+    right: 16,
+    backgroundColor: '#4338CA',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  popularBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  productPrice: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#0F172A',
+    marginTop: 8,
+    marginBottom: 4,
   },
   productInfo: {
     marginBottom: 16,

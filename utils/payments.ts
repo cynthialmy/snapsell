@@ -87,7 +87,102 @@ interface CheckoutOptions {
 }
 
 /**
+ * Purchase a pack (new freemium model)
+ * @param sku - Pack SKU: "credits_10", "credits_25", or "credits_60"
+ * @param options - Optional configuration including success_url and cancel_url
+ * @returns Checkout URL and purchase details
+ */
+export async function initiatePackPurchase(
+  sku: 'credits_10' | 'credits_25' | 'credits_60',
+  options?: CheckoutOptions
+): Promise<{ checkout_url: string; session_id: string; purchase_id: string }> {
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session) {
+      throw new Error('Not authenticated');
+    }
+
+    if (!EDGE_FUNCTION_BASE) {
+      throw new Error('Supabase Edge Functions URL not configured');
+    }
+
+    // Generate unique idempotency key for this purchase attempt
+    const idempotencyKey = `${Date.now()}-${Math.random().toString(36).substring(2, 15)}`;
+
+    // Get deep link scheme for default redirect URLs
+    const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
+    const defaultSuccessUrl = `${deepLinkScheme}://payment/success?session_id={CHECKOUT_SESSION_ID}`;
+    const defaultCancelUrl = `${deepLinkScheme}://payment/cancel`;
+
+    const requestBody: any = {
+      sku,
+      idempotency_key: idempotencyKey,
+    };
+
+    // Only include URLs if provided (backend will use defaults if not provided)
+    if (options?.successUrl) {
+      requestBody.success_url = options.successUrl;
+    } else {
+      requestBody.success_url = defaultSuccessUrl;
+    }
+    if (options?.cancelUrl) {
+      requestBody.cancel_url = options.cancelUrl;
+    } else {
+      requestBody.cancel_url = defaultCancelUrl;
+    }
+
+    const response = await fetch(`${EDGE_FUNCTION_BASE}/purchases`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify(requestBody),
+    });
+
+    if (!response.ok) {
+      // Try to get error details from response
+      let errorMessage = 'Failed to create purchase session';
+      let errorDetails: any = null;
+
+      try {
+        const errorText = await response.text();
+        try {
+          errorDetails = JSON.parse(errorText);
+          errorMessage = errorDetails.error || errorDetails.message || errorMessage;
+        } catch {
+          // Response is not JSON, might be HTML or plain text
+          errorMessage = `Backend error (${response.status} ${response.statusText}): ${errorText.substring(0, 200)}`;
+        }
+      } catch (e) {
+        errorMessage = `Backend error: ${response.status} ${response.statusText}`;
+      }
+
+      console.error('Pack purchase creation failed:', {
+        status: response.status,
+        statusText: response.statusText,
+        errorDetails,
+        url: `${EDGE_FUNCTION_BASE}/purchases`,
+      });
+
+      throw new Error(errorMessage);
+    }
+
+    const data = await response.json();
+    return {
+      checkout_url: data.checkout_url,
+      session_id: data.session_id,
+      purchase_id: data.purchase_id,
+    };
+  } catch (error: any) {
+    console.error('Pack purchase error:', error);
+    throw error;
+  }
+}
+
+/**
  * Create checkout session for credit purchase
+ * @deprecated Use initiatePackPurchase instead
  * @param credits - Number of credits to purchase (10, 25, or 60)
  * @param options - Optional configuration including success_url and cancel_url
  * @returns Checkout URL to redirect user to Stripe Checkout

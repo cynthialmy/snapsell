@@ -15,13 +15,16 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BlockedQuotaModal } from '@/components/BlockedQuotaModal';
+import { LowSlotsWarning } from '@/components/LowSlotsWarning';
+import { QuotaCounterPill } from '@/components/QuotaCounterPill';
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
-import { checkQuota } from '@/utils/listings-api';
+import { checkQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
 
 // Transform technical error messages to cute Snappy messages
@@ -66,8 +69,10 @@ export default function HomeScreen() {
   const { user } = useAuth();
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [quota, setQuota] = useState<{ used: number; limit: number; remaining: number } | null>(null);
+  const [quota, setQuota] = useState<UserQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(false);
+  const [showBlockedModal, setShowBlockedModal] = useState(false);
+  const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
 
   const ctaLabel = useMemo(
     () => (isAnalyzing ? 'Analyzing photo…' : 'Snap / Upload Item'),
@@ -84,33 +89,21 @@ export default function HomeScreen() {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
         trackEvent('quota_checked', {
           has_quota: !!currentQuota,
-          quota_used: currentQuota?.used,
-          quota_limit: currentQuota?.limit,
-          quota_remaining: currentQuota?.remaining,
+          creations_remaining: currentQuota?.creations_remaining_today,
+          creations_daily_limit: currentQuota?.creations_daily_limit,
+          save_slots_remaining: currentQuota?.save_slots_remaining,
+          is_pro: currentQuota?.is_pro,
         });
-        // Silently handle quota errors (backend might not be set up yet)
-        if (!quotaError && currentQuota && currentQuota.remaining === 0) {
-          // Quota exceeded
-          trackEvent('quota_exceeded', {
-            quota_limit: currentQuota.limit,
-            quota_used: currentQuota.used,
+
+        // Check if user can create (not Pro and no creations remaining)
+        if (!quotaError && currentQuota && !currentQuota.is_pro && currentQuota.creations_remaining_today === 0) {
+          // Quota exceeded - show blocked modal
+          trackEvent('generate_blocked_no_quota', {
+            creations_remaining: currentQuota.creations_remaining_today,
+            creations_daily_limit: currentQuota.creations_daily_limit,
           });
-          trackEvent('upgrade_prompt_shown', {
-            context: 'quota_exceeded',
-            quota_limit: currentQuota.limit,
-          });
-          Alert.alert(
-            'Quota Exceeded',
-            `You've used all ${currentQuota.limit} of your listings. Upgrade to create more listings.`,
-            [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Upgrade',
-                onPress: () => router.push('/(tabs)/upgrade'),
-              },
-            ]
-          );
           setIsAnalyzing(false);
+          setShowBlockedModal(true);
           return;
         }
       }
@@ -187,24 +180,27 @@ export default function HomeScreen() {
 
       // Reload quota after successful listing creation
       if (user) {
-        await loadQuota();
+        const { quota: updatedQuota } = await loadQuota();
+        // Show low quota nudge if creations <= 2
+        if (updatedQuota && !updatedQuota.is_pro && updatedQuota.creations_remaining_today <= 2) {
+          trackEvent('low_quota_nudge_shown', {
+            type: 'creation',
+            remaining: updatedQuota.creations_remaining_today,
+          });
+          setShowLowQuotaNudge(true);
+        }
       }
     } catch (error) {
       const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
+      const errorCode = (error as any)?.code;
 
-      // Check if it's a quota exceeded error
-      if (rawMessage.includes('quota') || rawMessage.includes('QUOTA_EXCEEDED')) {
-        Alert.alert(
-          'Quota Exceeded',
-          'You\'ve reached your listing limit. Upgrade to create more listings.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Upgrade',
-              onPress: () => router.push('/(tabs)/upgrade'),
-            },
-          ]
-        );
+      // Check if it's a quota exceeded error from the API
+      if (errorCode === 'QUOTA_EXCEEDED' || rawMessage.includes('QUOTA_EXCEEDED')) {
+        trackEvent('generate_blocked_no_quota', {
+          error_source: 'api',
+        });
+        setIsAnalyzing(false);
+        setShowBlockedModal(true);
       } else {
         setErrorMessage(transformErrorMessage(rawMessage));
       }
@@ -385,7 +381,7 @@ export default function HomeScreen() {
   const loadQuota = useCallback(async () => {
     if (!user) {
       setQuota(null);
-      return;
+      return null;
     }
 
     setQuotaLoading(true);
@@ -395,12 +391,24 @@ export default function HomeScreen() {
         // Silently handle backend not configured or unavailable
         // Only show quota if we successfully got it
         setQuota(null);
+        return null;
       } else if (userQuota) {
         setQuota(userQuota);
+        // Show low quota nudge if creations <= 2
+        if (!userQuota.is_pro && userQuota.creations_remaining_today <= 2) {
+          trackEvent('low_quota_nudge_shown', {
+            type: 'creation',
+            remaining: userQuota.creations_remaining_today,
+          });
+          setShowLowQuotaNudge(true);
+        }
+        return userQuota;
       }
+      return null;
     } catch (error) {
       // Silently handle errors - backend might not be set up yet
       setQuota(null);
+      return null;
     } finally {
       setQuotaLoading(false);
     }
@@ -422,26 +430,16 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <StatusBar barStyle="dark-content" />
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.eyebrow}>SNAPSELL</Text>
+        <View style={styles.header}>
+          <Text style={styles.eyebrow}>SNAPSELL</Text>
+          {user && quota && !quota.is_pro && (
+            <QuotaCounterPill
+              remaining={quota.creations_remaining_today}
+              limit={quota.creations_daily_limit}
+            />
+          )}
+        </View>
         <Text style={styles.title}>Turn a single photo into a ready-to-post listing.</Text>
-
-        {user && quota && (
-          <View style={styles.quotaCard}>
-            <Text style={styles.quotaText}>
-              {quota.used} / {quota.limit} Save Slots used
-            </Text>
-            <Text style={styles.quotaSubtext}>
-              {quota.remaining} Save Slots remaining
-            </Text>
-            {quota.remaining === 0 && (
-              <Pressable
-                onPress={() => router.push('/(tabs)/upgrade')}
-                style={styles.upgradeButton}>
-                <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
-              </Pressable>
-            )}
-          </View>
-        )}
 
         <View style={styles.steps}>
           <View style={styles.mascotCard}>
@@ -479,6 +477,31 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
       <SnappyLoading visible={isAnalyzing} />
+      {user && quota && (
+        <>
+          <BlockedQuotaModal
+            visible={showBlockedModal}
+            type="creation"
+            creationsRemaining={quota.creations_remaining_today}
+            creationsDailyLimit={quota.creations_daily_limit}
+            onDismiss={() => setShowBlockedModal(false)}
+            onPurchaseSuccess={() => {
+              setShowBlockedModal(false);
+              loadQuota();
+            }}
+          />
+          <LowSlotsWarning
+            visible={showLowQuotaNudge}
+            remaining={quota.creations_remaining_today}
+            type="creation"
+            onDismiss={() => setShowLowQuotaNudge(false)}
+            onUpgrade={() => {
+              setShowLowQuotaNudge(false);
+              router.push('/(tabs)/upgrade');
+            }}
+          />
+        </>
+      )}
     </SafeAreaView>
   );
 }
@@ -492,6 +515,12 @@ const styles = StyleSheet.create({
     padding: 24,
     paddingBottom: 48,
     gap: 16,
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
   },
   eyebrow: {
     fontSize: 12,

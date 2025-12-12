@@ -18,6 +18,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
+import { BlockedQuotaModal } from '@/components/BlockedQuotaModal';
 import { LoginGateModal } from '@/components/LoginGateModal';
 import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { QuotaModal } from '@/components/QuotaModal';
@@ -27,7 +28,7 @@ import { trackEvent, trackScreenView } from '@/utils/analytics';
 import type { ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing, updateListing } from '@/utils/listings';
-import { checkQuota, createListing, getListingById, updateListing as updateListingApi, uploadImage } from '@/utils/listings-api';
+import { checkQuota, createListing, getListingById, updateListing as updateListingApi, uploadImage, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
 import { checkQuotaModalShouldShow, getQuotaPeriod, markQuotaModalDismissed } from '@/utils/quota';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -68,11 +69,12 @@ export default function ListingPreviewScreen() {
   const [quotaCount, setQuotaCount] = useState(0);
 
   // Save Slots state
-  const [quota, setQuota] = useState<{ used: number; limit: number; remaining: number } | null>(null);
+  const [quota, setQuota] = useState<UserQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const [showLowSlotsWarning, setShowLowSlotsWarning] = useState(false);
   const [showSaveSuccessToast, setShowSaveSuccessToast] = useState(false);
+  const [showBlockedSaveModal, setShowBlockedSaveModal] = useState(false);
 
   // Auto-save checkbox state
   const [autoSaveListing, setAutoSaveListing] = useState(false);
@@ -361,8 +363,12 @@ export default function ListingPreviewScreen() {
       // Update listingId when payload changes
       setListingId(payload.listingId);
       // Update backendListingId when payload changes
+      // IMPORTANT: Reset to null if payload doesn't have backendListingId (new listing)
       if (payload.backendListingId) {
         setBackendListingId(payload.backendListingId);
+      } else {
+        // Reset backendListingId for new listings (no backendListingId in payload)
+        setBackendListingId(null);
       }
       // Update image URI from payload
       if (payload.imageUri) {
@@ -763,6 +769,16 @@ export default function ListingPreviewScreen() {
       return; // Don't update checkbox state
     }
 
+    // Check if save slots are available
+    if (value && user && quota && !quota.is_pro && quota.save_slots_remaining === 0) {
+      // No save slots available - show blocked modal
+      trackEvent('save_blocked_no_quota', {
+        save_slots_remaining: quota.save_slots_remaining,
+      });
+      setShowBlockedSaveModal(true);
+      return; // Don't update checkbox state
+    }
+
     // User is authenticated or unchecking, update preference
     console.log('[AutoSave] Updating preference:', value);
     setAutoSaveListing(value);
@@ -1073,15 +1089,20 @@ export default function ListingPreviewScreen() {
                 }, 4000);
 
                 // Show low slots warning if at 2 slots left
-                if (updatedQuota.remaining === 2) {
+                if (updatedQuota.save_slots_remaining === 2) {
+                  trackEvent('low_quota_nudge_shown', {
+                    type: 'save',
+                    remaining: updatedQuota.save_slots_remaining,
+                  });
                   setShowLowSlotsWarning(true);
                 }
 
-                // Check quota modal if needed
+                // Check quota modal if needed (using save slots as count)
                 if (user?.id) {
-                  const shouldShow = await checkQuotaModalShouldShow(user.id, updatedQuota.used);
+                  const saveSlotsUsed = updatedQuota.free_save_slots - updatedQuota.save_slots_remaining;
+                  const shouldShow = await checkQuotaModalShouldShow(user.id, saveSlotsUsed);
                   if (shouldShow) {
-                    setQuotaCount(updatedQuota.used);
+                    setQuotaCount(saveSlotsUsed);
                     setShowQuotaModal(true);
                   }
                 }
@@ -1466,14 +1487,14 @@ export default function ListingPreviewScreen() {
                   <Text style={styles.toggleLabel}>
                     Save this listing for future
                     {user && quota && !quotaLoading && (
-                      <Text style={styles.slotsCount}> ({quota.remaining} Save Slots left)</Text>
+                      <Text style={styles.slotsCount}> ({quota.save_slots_remaining} left)</Text>
                     )}
                   </Text>
                 </View>
                 <Switch
                   value={autoSaveListing}
                   onValueChange={handleAutoSaveToggle}
-                  disabled={false}
+                  disabled={user && quota && !quota.is_pro && quota.save_slots_remaining === 0}
                 />
               </View>
               {!user && (
@@ -1540,7 +1561,7 @@ export default function ListingPreviewScreen() {
 
       <SaveSlotsPaywall
         visible={showPaywall}
-        limit={quota?.limit || 10}
+        limit={quota?.free_save_slots || 10}
         onBuySlots={() => {
           setShowPaywall(false);
           router.push('/(tabs)/upgrade');
@@ -1556,7 +1577,8 @@ export default function ListingPreviewScreen() {
 
       <LowSlotsWarning
         visible={showLowSlotsWarning}
-        remaining={quota?.remaining || 0}
+        remaining={quota?.save_slots_remaining || 0}
+        type="save"
         onDismiss={() => {
           setShowLowSlotsWarning(false);
         }}
@@ -1570,9 +1592,27 @@ export default function ListingPreviewScreen() {
       {showSaveSuccessToast && quota && (
         <View style={styles.saveSuccessToast}>
           <Text style={styles.saveSuccessToastText}>
-            Saved! 🎉 You have {quota.remaining} Save Slot{quota.remaining !== 1 ? 's' : ''} left.
+            Saved! 🎉 You have {quota.save_slots_remaining} Save Slot{quota.save_slots_remaining !== 1 ? 's' : ''} left.
           </Text>
         </View>
+      )}
+
+      {user && quota && (
+        <BlockedQuotaModal
+          visible={showBlockedSaveModal}
+          type="save"
+          saveSlotsRemaining={quota.save_slots_remaining}
+          freeSaveSlots={quota.free_save_slots}
+          onDismiss={() => setShowBlockedSaveModal(false)}
+          onPurchaseSuccess={async () => {
+            setShowBlockedSaveModal(false);
+            // Reload quota after purchase
+            const { quota: updatedQuota } = await checkQuota();
+            if (updatedQuota) {
+              setQuota(updatedQuota);
+            }
+          }}
+        />
       )}
     </SafeAreaView>
   );

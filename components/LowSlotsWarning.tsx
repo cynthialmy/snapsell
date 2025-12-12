@@ -11,6 +11,7 @@ interface LowSlotsWarningProps {
 export function LowSlotsWarning({
   visible,
   remaining,
+  type = 'save',
   onDismiss,
   onUpgrade,
 }: LowSlotsWarningProps) {
@@ -117,8 +118,9 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  emoji: {
-    fontSize: 24,
+  snappyIcon: {
+    width: 28,
+    height: 28,
     marginRight: 12,
   },
   textContainer: {
@@ -148,4 +150,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

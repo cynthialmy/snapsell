@@ -188,7 +188,17 @@ export async function generateListingContent(storagePath: string) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({ error: 'Generation failed' }));
-      throw new Error(errorData.error || `Generation failed with status ${response.status}`);
+
+      // Handle quota exceeded (402)
+      if (response.status === 402 && errorData.code === 'QUOTA_EXCEEDED') {
+        const quotaError: any = new Error(errorData.message || 'Quota exceeded');
+        quotaError.code = 'QUOTA_EXCEEDED';
+        quotaError.creations_remaining_today = errorData.creations_remaining_today ?? 0;
+        quotaError.bonus_creations_remaining = errorData.bonus_creations_remaining ?? 0;
+        throw quotaError;
+      }
+
+      throw new Error(errorData.error || errorData.message || `Generation failed with status ${response.status}`);
     }
 
     const data = await response.json();
@@ -278,21 +288,49 @@ export async function createListing(params: CreateListingParams) {
     }
 
     if (!response.ok) {
-      console.error('[CreateListing] Error response:', data);
+      // Log error details for debugging
+      console.error('[CreateListing] Error response:', {
+        status: response.status,
+        error: data.error,
+        details: data.details,
+        type: data.type,
+      });
 
-      // Handle quota exceeded (402)
+      // Handle save slots exceeded (402)
       if (response.status === 402) {
+        const errorCode = data.code || (data.error?.includes('save') ? 'SAVE_SLOTS_EXCEEDED' : 'QUOTA_EXCEEDED');
         return {
           listing: null,
           error: {
-            code: 'QUOTA_EXCEEDED',
-            message: data.message || 'Quota exceeded',
+            code: errorCode,
+            message: data.message || data.error || 'Quota exceeded',
+            save_slots_remaining: data.save_slots_remaining ?? 0,
             ...data,
           },
         };
       }
 
-      // Return detailed error information
+      // Handle 500 errors (backend bugs) - log but don't expose technical details to user
+      if (response.status >= 500) {
+        console.error('[CreateListing] Backend error (500+):', {
+          status: response.status,
+          error: data.error,
+          details: data.details,
+          type: data.type,
+        });
+        return {
+          listing: null,
+          error: {
+            message: 'Backend service error. Please try again later.',
+            details: data.details || data.error || 'Internal server error',
+            code: data.code,
+            status: response.status,
+            ...data,
+          },
+        };
+      }
+
+      // Return detailed error information for other errors
       const errorMessage = data.error || 'Failed to create listing';
       const errorDetails = data.details || data.message || '';
 
@@ -528,9 +566,24 @@ export async function createListingFromImage(
 // ============================================
 
 /**
- * Check current usage and quota
+ * User quota response structure
  */
-export async function checkQuota() {
+export interface UserQuota {
+  user_id: string;
+  is_pro: boolean;
+  creations_remaining_today: number;
+  creations_daily_limit: number;
+  bonus_creations_remaining: number;
+  save_slots_remaining: number;
+  free_save_slots: number;
+  resets_at: string;
+}
+
+/**
+ * Check current usage and quota
+ * Uses new /user-quota endpoint
+ */
+export async function checkQuota(): Promise<{ quota: UserQuota | null; error: any | null }> {
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
@@ -543,7 +596,7 @@ export async function checkQuota() {
       return { quota: null, error: { message: 'Backend not configured' } };
     }
 
-    const response = await fetch(`${EDGE_FUNCTION_BASE}/usage-check-quota`, {
+    const response = await fetch(`${EDGE_FUNCTION_BASE}/user-quota`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
@@ -554,22 +607,30 @@ export async function checkQuota() {
     if (!response.ok) {
       // Try to parse error, but handle cases where response isn't JSON
       let errorMessage = 'Failed to check quota';
+      let errorDetails: any = null;
       try {
         const error = await response.json();
-        errorMessage = error.error || errorMessage;
+        errorMessage = error.error || error.message || errorMessage;
+        errorDetails = error.details || error.error || null;
       } catch {
         errorMessage = `Server error (${response.status})`;
       }
 
-      // Only log if it's not a 500/502/503 (server errors that might be expected during setup)
-      if (response.status < 500) {
+      // Log detailed error for debugging (especially 500 errors which indicate backend issues)
+      if (response.status >= 500) {
+        console.error('Check quota backend error:', {
+          status: response.status,
+          message: errorMessage,
+          details: errorDetails,
+        });
+      } else if (response.status < 500) {
         console.warn('Check quota error:', errorMessage);
       }
 
-      return { quota: null, error: { message: errorMessage, status: response.status } };
+      return { quota: null, error: { message: errorMessage, details: errorDetails, status: response.status } };
     }
 
-    const data = await response.json();
+    const data: UserQuota = await response.json();
     return { quota: data, error: null };
   } catch (error: any) {
     // Don't log network errors or backend unavailable errors - these are expected during setup
