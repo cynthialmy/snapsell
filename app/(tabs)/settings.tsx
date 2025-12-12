@@ -16,21 +16,15 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { signOut } from '@/utils/auth';
-import { checkQuota } from '@/utils/listings-api';
+import { checkQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
 
 const CURRENCY_OPTIONS = ['$', '€', '£', 'kr', '¥'];
 
-interface Quota {
-  used: number;
-  limit: number;
-  remaining: number;
-}
-
 export default function SettingsScreen() {
   const router = useRouter();
   const { user } = useAuth();
-  const [quota, setQuota] = useState<Quota | null>(null);
+  const [quota, setQuota] = useState<UserQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(true);
   const [location, setLocation] = useState('');
   const [currency, setCurrency] = useState('$');
@@ -241,26 +235,47 @@ export default function SettingsScreen() {
               <Text style={styles.quotaText}>Loading...</Text>
             ) : quota ? (
               <View style={styles.quotaContainer}>
-                <Text style={styles.quotaText}>
-                  {quota.used} / {quota.limit} Save Slots used
-                </Text>
-                <Text style={styles.quotaSubtext}>
-                  {quota.remaining} Save Slots remaining
-                </Text>
-                {quota.remaining === 0 && (
-                  <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
-                    <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
-                  </Pressable>
-                )}
+                {/* Creation Quota */}
+                <View style={styles.quotaItem}>
+                  <Text style={styles.quotaLabel}>Creating Listings</Text>
+                  <Text style={styles.quotaText}>
+                    {quota.creations_daily_limit - quota.creations_remaining_today} / {quota.creations_daily_limit} used today
+                  </Text>
+                  <Text style={styles.quotaSubtext}>
+                    {quota.creations_remaining_today} remaining today
+                    {quota.bonus_creations_remaining > 0 && ` • ${quota.bonus_creations_remaining} bonus remaining`}
+                  </Text>
+                  {quota.creations_remaining_today === 0 && quota.bonus_creations_remaining === 0 && (
+                    <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
+                      <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
+                    </Pressable>
+                  )}
+                </View>
+
+                {/* Save Slots Quota */}
+                <View style={[styles.quotaItem, styles.quotaItemSeparator]}>
+                  <Text style={styles.quotaLabel}>Save Slots</Text>
+                  <Text style={styles.quotaText}>
+                    {quota.free_save_slots - quota.save_slots_remaining} / {quota.free_save_slots} used
+                  </Text>
+                  <Text style={styles.quotaSubtext}>
+                    {quota.save_slots_remaining} Save Slots remaining
+                  </Text>
+                  {quota.save_slots_remaining === 0 && (
+                    <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
+                      <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
+                    </Pressable>
+                  )}
+                </View>
               </View>
             ) : (
               <Text style={styles.quotaText}>Unable to load quota</Text>
             )
           ) : (
             <View style={styles.quotaContainer}>
-              <Text style={styles.quotaText}>Sign in to view your Save Slots quota and usage</Text>
+              <Text style={styles.quotaText}>Sign in to view your quota and usage</Text>
               <Text style={styles.quotaSubtext}>
-                Free tier includes 3-5 Save Slots
+                Free tier includes daily creation limits and 3-5 Save Slots
               </Text>
               <Pressable
                 onPress={() => router.push('/(auth)/sign-in')}
@@ -409,7 +424,21 @@ const styles = StyleSheet.create({
     color: '#64748B',
   },
   quotaContainer: {
-    gap: 8,
+    gap: 16,
+  },
+  quotaItem: {
+    gap: 4,
+  },
+  quotaItemSeparator: {
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: '#E2E8F0',
+  },
+  quotaLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#475569',
+    marginBottom: 4,
   },
   quotaText: {
     fontSize: 16,
