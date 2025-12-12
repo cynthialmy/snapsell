@@ -1,8 +1,6 @@
-import * as Linking from 'expo-linking';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -14,7 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent, trackScreenView } from '@/utils/analytics';
 import { checkQuota } from '@/utils/listings-api';
-import { getPaymentHistory, initiateCreditPurchase, initiateProSubscription, type PaymentHistoryItem } from '@/utils/payments';
+import { getPaymentHistory, type PaymentHistoryItem } from '@/utils/payments';
 
 interface Quota {
   used: number;
@@ -27,9 +25,9 @@ export default function UpgradeScreen() {
   const { user } = useAuth();
   const [quota, setQuota] = useState<Quota | null>(null);
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState(false);
   const [paymentHistory, setPaymentHistory] = useState<PaymentHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [showSaveSlotsInfo, setShowSaveSlotsInfo] = useState(false);
 
   const loadQuota = useCallback(async () => {
     if (!user) {
@@ -83,126 +81,6 @@ export default function UpgradeScreen() {
     }, [loadQuota, loadPaymentHistory, user])
   );
 
-  const handlePurchaseCredits = async (credits: 10 | 25 | 60) => {
-    if (!user) {
-      Alert.alert(
-        'Account required',
-        'You need to create an account to purchase Save Slots or upgrade. Sign in to continue.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Sign In',
-            onPress: () => router.push('/(auth)/sign-in'),
-          },
-        ]
-      );
-      return;
-    }
-
-    setProcessing(true);
-    try {
-      // Track purchase initiation
-      trackEvent('purchase_initiated', {
-        product_type: 'credits',
-        product_id: credits.toString(),
-        amount: credits, // This would be the actual price in production
-      });
-
-      // Use deep links directly for Stripe redirects
-      // Note: Browser redirects can't include auth headers, so we use deep links
-      // The webhook processes payment automatically; deep link is for UX
-      const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
-      const successUrl = `${deepLinkScheme}://payment/success?session_id={CHECKOUT_SESSION_ID}`;
-      const cancelUrl = `${deepLinkScheme}://payment/cancel`;
-
-      const checkoutUrl = await initiateCreditPurchase(credits, {
-        successUrl,
-        cancelUrl,
-      });
-
-      // Open Stripe checkout in browser
-      const canOpen = await Linking.canOpenURL(checkoutUrl);
-      if (canOpen) {
-        await Linking.openURL(checkoutUrl);
-        Alert.alert(
-          'Payment Started',
-          'Complete your payment in the browser. You will be redirected back to the app when payment is complete.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert('Error', 'Cannot open payment URL');
-      }
-    } catch (error: any) {
-      trackEvent('purchase_failed', {
-        product_type: 'credits',
-        product_id: credits.toString(),
-        error: error.message || 'Unknown error',
-      });
-      Alert.alert('Error', error.message || 'Failed to start payment. Please try again.');
-    } finally {
-      setProcessing(false);
-    }
-  };
-
-  const handleSubscribe = async (plan: 'monthly' | 'yearly') => {
-    if (!user) {
-      Alert.alert(
-        'Account required',
-        'You need to create an account to purchase Save Slots or upgrade. Sign in to continue.',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          {
-            text: 'Sign In',
-            onPress: () => router.push('/(auth)/sign-in'),
-          },
-        ]
-      );
-      return;
-    }
-
-    setProcessing(true);
-    try {
-      // Track subscription initiation
-      trackEvent('purchase_initiated', {
-        product_type: 'subscription',
-        product_id: plan,
-        amount: plan === 'monthly' ? 'monthly' : 'yearly', // This would be the actual price in production
-      });
-
-      // Use deep links directly for Stripe redirects
-      // Note: Browser redirects can't include auth headers, so we use deep links
-      // The webhook processes payment automatically; deep link is for UX
-      const deepLinkScheme = process.env.EXPO_PUBLIC_DEEP_LINK_SCHEME || 'snapsell';
-      const successUrl = `${deepLinkScheme}://payment/success?session_id={CHECKOUT_SESSION_ID}`;
-      const cancelUrl = `${deepLinkScheme}://payment/cancel`;
-
-      const checkoutUrl = await initiateProSubscription(plan, {
-        successUrl,
-        cancelUrl,
-      });
-
-      const canOpen = await Linking.canOpenURL(checkoutUrl);
-      if (canOpen) {
-        await Linking.openURL(checkoutUrl);
-        Alert.alert(
-          'Subscription Started',
-          'Complete your subscription in the browser. You will be redirected back to the app when payment is complete.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert('Error', 'Cannot open payment URL');
-      }
-    } catch (error: any) {
-      trackEvent('purchase_failed', {
-        product_type: 'subscription',
-        product_id: plan,
-        error: error.message || 'Unknown error',
-      });
-      Alert.alert('Error', error.message || 'Failed to start subscription. Please try again.');
-    } finally {
-      setProcessing(false);
-    }
-  };
 
   if (loading) {
     return (
@@ -219,39 +97,6 @@ export default function UpgradeScreen() {
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
         <Text style={styles.title}>Upgrade & Save Slots</Text>
 
-        {/* Save Slots Balance Card */}
-        {user && (
-          <View style={styles.creditsCard}>
-            <Text style={styles.creditsTitle}>Your Save Slots</Text>
-            <Text style={styles.creditsAmount}>
-              {((user as any).credits ?? 0)} Save Slots
-            </Text>
-            <Text style={styles.creditsExplanation}>
-              1 Save Slot = 1 saved listing. Save Slots never expire and can be used anytime.
-            </Text>
-            {/* Debug: Show user data */}
-            {__DEV__ && (
-              <Text style={{ fontSize: 10, color: '#999', marginTop: 8 }}>
-                Debug: credits={((user as any).credits ?? 'undefined')},
-                user_id={user.id?.substring(0, 8)}...
-              </Text>
-            )}
-          </View>
-        )}
-
-        {/* What are Save Slots Explanation */}
-        <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>What are Save Slots?</Text>
-          <Text style={styles.infoText}>
-            Creating listings is always free. Save Slots let you save listings to your account for later. Each Save Slot equals one saved listing.
-          </Text>
-          <Text style={styles.infoText}>
-            • Save Slots never expire{'\n'}
-            • Use them anytime to save listings{'\n'}
-            • Purchase Save Slot packs or subscribe for unlimited saves
-          </Text>
-        </View>
-
         {quota && (
           <View style={styles.quotaCard}>
             <Text style={styles.quotaTitle}>Current Usage</Text>
@@ -261,115 +106,52 @@ export default function UpgradeScreen() {
             <Text style={styles.quotaSubtext}>
               {quota.remaining} remaining
             </Text>
+
+            {/* Collapsible "What are Save Slots?" section */}
+            <Pressable
+              onPress={() => setShowSaveSlotsInfo(!showSaveSlotsInfo)}
+              style={styles.infoToggle}>
+              <Text style={styles.infoToggleText}>
+                What are Save Slots?
+              </Text>
+              <Text style={styles.infoToggleIcon}>
+                {showSaveSlotsInfo ? '▼' : '▶'}
+              </Text>
+            </Pressable>
+
+            {showSaveSlotsInfo && (
+              <View style={styles.infoContent}>
+                <Text style={styles.infoText}>
+                  Creating listings is always free. Save Slots let you save listings to your account for later. Each Save Slot equals one saved listing.
+                </Text>
+                <Text style={styles.infoText}>
+                  • Save Slots never expire{'\n'}
+                  • Use them anytime to save listings{'\n'}
+                  • Purchase Save Slot packs or subscribe for unlimited saves
+                </Text>
+              </View>
+            )}
           </View>
         )}
 
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Credit Packs</Text>
+          <Text style={styles.sectionTitle}>Purchase Options</Text>
           <Text style={styles.sectionDescription}>
-            Purchase additional credits to create more listings
+            Choose from Save Slot packs or subscription plans
           </Text>
 
-          <View style={styles.productCard}>
-            <View style={styles.productInfo}>
-              <Text style={styles.productName}>10 Credits</Text>
-              <Text style={styles.productDescription}>Create 10 additional listings</Text>
-            </View>
-            <Pressable
-              onPress={() => handlePurchaseCredits(10)}
-              disabled={processing}
-              style={({ pressed }) => [
-                styles.purchaseButton,
-                (processing || pressed) && styles.purchaseButtonDisabled,
-              ]}>
-              <Text style={styles.purchaseButtonText}>
-                {processing ? 'Processing...' : 'Purchase'}
-              </Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.productCard}>
-            <View style={styles.productInfo}>
-              <Text style={styles.productName}>25 Save Slots</Text>
-              <Text style={styles.productDescription}>Save 25 listings to your account. Save Slots never expire and can be used anytime.</Text>
-              <Text style={styles.productNote}>Creating listings is always free. Save Slots are only used when you save a listing.</Text>
-            </View>
-            <Pressable
-              onPress={() => handlePurchaseCredits(25)}
-              disabled={processing}
-              style={({ pressed }) => [
-                styles.purchaseButton,
-                (processing || pressed) && styles.purchaseButtonDisabled,
-              ]}>
-              <Text style={styles.purchaseButtonText}>
-                {processing ? 'Processing...' : 'Purchase'}
-              </Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.productCard}>
-            <View style={styles.productInfo}>
-              <Text style={styles.productName}>60 Save Slots</Text>
-              <Text style={styles.productDescription}>Save 60 listings to your account. Save Slots never expire and can be used anytime.</Text>
-              <Text style={styles.productNote}>Creating listings is always free. Save Slots are only used when you save a listing.</Text>
-            </View>
-            <Pressable
-              onPress={() => handlePurchaseCredits(60)}
-              disabled={processing}
-              style={({ pressed }) => [
-                styles.purchaseButton,
-                (processing || pressed) && styles.purchaseButtonDisabled,
-              ]}>
-              <Text style={styles.purchaseButtonText}>
-                {processing ? 'Processing...' : 'Purchase'}
-              </Text>
-            </Pressable>
-          </View>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Subscription Plans</Text>
-          <Text style={styles.sectionDescription}>
-            Get unlimited Save Slots with a subscription
-          </Text>
-
-          <View style={styles.productCard}>
-            <View style={styles.productInfo}>
-              <Text style={styles.productName}>Pro Monthly</Text>
-              <Text style={styles.productDescription}>Unlimited Save Slots forever. Save as many listings as you want, no limits.</Text>
-              <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
-            </View>
-            <Pressable
-              onPress={() => handleSubscribe('monthly')}
-              disabled={processing}
-              style={({ pressed }) => [
-                styles.purchaseButton,
-                (processing || pressed) && styles.purchaseButtonDisabled,
-              ]}>
-              <Text style={styles.purchaseButtonText}>
-                {processing ? 'Processing...' : 'Subscribe'}
-              </Text>
-            </Pressable>
-          </View>
-
-          <View style={styles.productCard}>
-            <View style={styles.productInfo}>
-              <Text style={styles.productName}>Pro Yearly</Text>
-              <Text style={styles.productDescription}>Unlimited Save Slots forever. Best value for frequent sellers.</Text>
-              <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
-            </View>
-            <Pressable
-              onPress={() => handleSubscribe('yearly')}
-              disabled={processing}
-              style={({ pressed }) => [
-                styles.purchaseButton,
-                (processing || pressed) && styles.purchaseButtonDisabled,
-              ]}>
-              <Text style={styles.purchaseButtonText}>
-                {processing ? 'Processing...' : 'Subscribe'}
-              </Text>
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={() => {
+              trackEvent('purchase_options_opened', { source: 'upgrade_screen' });
+              router.push('/purchase');
+            }}
+            style={({ pressed }) => [
+              styles.purchaseOptionsButton,
+              pressed && styles.purchaseOptionsButtonPressed,
+            ]}>
+            <Text style={styles.purchaseOptionsButtonText}>View All Purchase Options</Text>
+            <Text style={styles.purchaseOptionsArrow}>→</Text>
+          </Pressable>
         </View>
 
         {/* Purchase History */}
@@ -456,53 +238,6 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     marginBottom: 24,
   },
-  creditsCard: {
-    backgroundColor: '#F0FDF4',
-    borderRadius: 14,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#BBF7D0',
-  },
-  creditsTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#166534',
-    marginBottom: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  creditsAmount: {
-    fontSize: 32,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 8,
-  },
-  creditsExplanation: {
-    fontSize: 13,
-    color: '#64748B',
-    lineHeight: 18,
-  },
-  infoCard: {
-    backgroundColor: '#F8FAFC',
-    borderRadius: 14,
-    padding: 20,
-    marginBottom: 24,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
-  },
-  infoTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 12,
-  },
-  infoText: {
-    fontSize: 14,
-    color: '#64748B',
-    lineHeight: 20,
-    marginBottom: 8,
-  },
   quotaCard: {
     backgroundColor: '#EFF6FF',
     borderRadius: 14,
@@ -528,6 +263,37 @@ const styles = StyleSheet.create({
   quotaSubtext: {
     fontSize: 14,
     color: '#64748B',
+    marginBottom: 12,
+  },
+  infoToggle: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#BFDBFE',
+  },
+  infoToggleText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#0369A1',
+  },
+  infoToggleIcon: {
+    fontSize: 12,
+    color: '#0369A1',
+  },
+  infoContent: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#BFDBFE',
+  },
+  infoText: {
+    fontSize: 14,
+    color: '#64748B',
+    lineHeight: 20,
+    marginBottom: 8,
   },
   section: {
     marginBottom: 32,
@@ -543,50 +309,29 @@ const styles = StyleSheet.create({
     color: '#64748B',
     marginBottom: 16,
   },
-  productCard: {
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 20,
+  purchaseOptionsButton: {
+    backgroundColor: '#4338CA',
+    borderRadius: 12,
+    padding: 16,
     marginBottom: 12,
-    borderWidth: 1,
-    borderColor: '#E2E8F0',
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  productInfo: {
-    flex: 1,
+  purchaseOptionsButtonPressed: {
+    backgroundColor: '#3730A3',
+    opacity: 0.9,
   },
-  productName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#0F172A',
-    marginBottom: 4,
-  },
-  productDescription: {
-    fontSize: 14,
-    color: '#64748B',
-    marginBottom: 4,
-  },
-  productNote: {
-    fontSize: 12,
-    color: '#94A3B8',
-    fontStyle: 'italic',
-    marginTop: 4,
-  },
-  purchaseButton: {
-    backgroundColor: '#4338CA',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-  },
-  purchaseButtonDisabled: {
-    opacity: 0.5,
-  },
-  purchaseButtonText: {
-    color: '#FFFFFF',
-    fontSize: 14,
+  purchaseOptionsButtonText: {
+    fontSize: 16,
     fontWeight: '600',
+    color: '#FFFFFF',
+  },
+  purchaseOptionsArrow: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    fontWeight: '600',
+    marginLeft: 8,
   },
   noteSection: {
     marginTop: 16,

@@ -32,6 +32,7 @@ function RootLayoutNav() {
     const onShareScreen = segments[0] === 'share';
     const onAuthCallback = segments[0] === 'auth' && segments[1] === 'callback';
     const onProfileScreen = segments[0] === 'profile';
+    const onPurchaseScreen = segments[0] === 'purchase';
     // Check if we're on tabs index (first tab, which is the home screen)
     // When in tabs group with only one segment, we're on the index tab
     const onTabsIndex = inTabsGroup && segments.length === 1;
@@ -43,6 +44,11 @@ function RootLayoutNav() {
 
     // Don't interfere with profile modal - allow it to be shown
     if (onProfileScreen) {
+      return;
+    }
+
+    // Don't interfere with purchase modal - allow it to be shown
+    if (onPurchaseScreen) {
       return;
     }
 
@@ -376,6 +382,15 @@ function RootLayoutNav() {
         name="profile"
         options={{
           title: 'Profile',
+          headerShown: true,
+          presentation: Platform.OS === 'ios' ? 'modal' : 'card',
+          animation: Platform.OS === 'ios' ? 'default' : 'slide_from_bottom',
+        }}
+      />
+      <Stack.Screen
+        name="purchase"
+        options={{
+          title: 'Purchase Options',
           headerShown: true,
           presentation: Platform.OS === 'ios' ? 'modal' : 'card',
           animation: Platform.OS === 'ios' ? 'default' : 'slide_from_bottom',
