@@ -156,7 +156,7 @@ export default function PurchaseScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Save Slot Packs</Text>
           <Text style={styles.sectionDescription}>
-            Purchase additional Save Slots to save more listings
+            Free tier includes 10 creations per day and 10 free Save Slots. Purchase additional Save Slots to save more listings.
           </Text>
 
           <View style={styles.productCard}>
@@ -167,7 +167,7 @@ export default function PurchaseScreen() {
               </Text>
               <Text style={styles.productPrice}>$5.00</Text>
               <Text style={styles.productNote}>
-                Creating listings is always free. Save Slots are only used when you save a listing.
+                Creating listings is always free (10 per day on free tier). Save Slots are only used when you save a listing.
               </Text>
             </View>
             <Pressable
@@ -191,7 +191,7 @@ export default function PurchaseScreen() {
               </Text>
               <Text style={styles.productPrice}>$10.00</Text>
               <Text style={styles.productNote}>
-                Creating listings is always free. Save Slots are only used when you save a listing.
+                Creating listings is always free (10 per day on free tier). Save Slots are only used when you save a listing.
               </Text>
             </View>
             <Pressable
@@ -215,7 +215,7 @@ export default function PurchaseScreen() {
               </Text>
               <Text style={styles.productPrice}>$20.00</Text>
               <Text style={styles.productNote}>
-                Creating listings is always free. Save Slots are only used when you save a listing.
+                Creating listings is always free (10 per day on free tier). Save Slots are only used when you save a listing.
               </Text>
             </View>
             <Pressable
@@ -236,14 +236,14 @@ export default function PurchaseScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Subscription Plans</Text>
           <Text style={styles.sectionDescription}>
-            Get unlimited Save Slots with a subscription
+            Free tier includes 10 creations per day and 10 free Save Slots. Get unlimited creations and Save Slots with a subscription.
           </Text>
 
           <View style={styles.productCard}>
             <View style={styles.productInfo}>
               <Text style={styles.productName}>Pro Monthly</Text>
               <Text style={styles.productDescription}>
-                Unlimited Save Slots forever. Save as many listings as you want, no limits.
+                Unlimited creations per day and unlimited Save Slots forever. No limits on creating or saving listings.
               </Text>
               <Text style={styles.productPrice}>$4.99/month</Text>
               <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>
@@ -265,7 +265,7 @@ export default function PurchaseScreen() {
             <View style={styles.productInfo}>
               <Text style={styles.productName}>Pro Yearly</Text>
               <Text style={styles.productDescription}>
-                Unlimited Save Slots forever. Best value for frequent sellers.
+                Unlimited creations per day and unlimited Save Slots forever. Best value for frequent sellers.
               </Text>
               <Text style={styles.productPrice}>$35.99/year</Text>
               <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>

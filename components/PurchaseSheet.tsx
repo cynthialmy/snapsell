@@ -198,7 +198,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Pack Options</Text>
                 <Text style={styles.sectionDescription}>
-                  Purchase packs to add both creations and Save Slots
+                  Free tier includes 10 creations per day and 10 free Save Slots. Purchase packs to add both creations and Save Slots.
                 </Text>
 
                 <View style={styles.productCard}>
@@ -273,14 +273,14 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
               <View style={styles.section}>
                 <Text style={styles.sectionTitle}>Subscription Plans</Text>
                 <Text style={styles.sectionDescription}>
-                  Get unlimited creations and Save Slots with a subscription
+                  Free tier includes 10 creations per day and 10 free Save Slots. Get unlimited creations and Save Slots with a subscription.
                 </Text>
 
                 <View style={styles.productCard}>
                   <View style={styles.productInfo}>
                     <Text style={styles.productName}>Pro Monthly</Text>
                     <Text style={styles.productDescription}>
-                      Unlimited creations and Save Slots forever. No limits.
+                      Unlimited creations per day and unlimited Save Slots forever. No limits on creating or saving listings.
                     </Text>
                     <Text style={styles.productPrice}>$4.99/month</Text>
                     <Text style={styles.productNote}>Cancel anytime. Your saved listings remain accessible.</Text>

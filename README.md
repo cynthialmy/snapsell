@@ -140,3 +140,76 @@ If the automatic connection fails, you can manually enter the Metro URL in the E
 3. In the Expo dev client on your phone, tap "Enter URL manually" and enter the Metro URL
 
 **Note:** The `app.json` and `eas.json` configurations are correct and don't need changes for device connectivity. The issue is purely network-related between your device and the Metro bundler.
+
+## Creating Preview Builds
+
+Preview builds are standalone builds that can be installed directly on your device without needing a development server. They're perfect for testing the app in a production-like environment or sharing with testers.
+
+### Prerequisites
+
+1. **Install EAS CLI** (if not already installed):
+```bash
+npm install -g eas-cli
+```
+
+2. **Login to your Expo account**:
+```bash
+eas login
+```
+
+3. **Configure your project** (if not already done):
+```bash
+eas build:configure
+```
+
+### Building for iOS Preview
+
+To create a preview build for iOS that can be installed on your physical device:
+
+```bash
+eas build --platform ios --profile preview
+```
+
+This will:
+- Build a standalone iOS app
+- Create an `.ipa` file that can be installed via TestFlight or direct install
+- Use the `preview` profile from `eas.json` (internal distribution, physical device)
+
+**Installation Options:**
+
+1. **Via TestFlight (Recommended):**
+   - After the build completes, submit it to TestFlight:
+   ```bash
+   eas submit --platform ios --latest
+   ```
+   - Then distribute via TestFlight to your device
+
+2. **Direct Install:**
+   - Download the `.ipa` from the EAS build page
+   - Install using tools like Apple Configurator 2 or Xcode
+
+### Building for Android Preview
+
+To create a preview build for Android:
+
+```bash
+eas build --platform android --profile preview
+```
+
+This creates an `.apk` or `.aab` file that can be installed directly on Android devices.
+
+**Installation:**
+- Download the `.apk` from the EAS build page
+- Enable "Install from unknown sources" on your Android device
+- Transfer and install the `.apk` file
+
+### Environment Variables for Preview Builds
+
+Preview builds use the same environment variable configuration as production builds. If you need PostHog analytics or other environment variables in your preview builds, set them as EAS secrets:
+
+```bash
+eas secret:create --scope project --name EXPO_PUBLIC_POSTHOG_API_KEY --value your_posthog_api_key_here
+eas secret:create --scope project --name EXPO_PUBLIC_POSTHOG_HOST --value https://us.i.posthog.com
+```
+
+**Note:** Preview builds are standalone and don't require Metro bundler or a development server. They connect directly to your configured backend (defaults to the hosted backend on physical devices).
