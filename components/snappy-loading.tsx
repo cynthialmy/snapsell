@@ -43,6 +43,13 @@ export function SnappyLoading({ visible, onCancel }: SnappyLoadingProps) {
     }
   }, [visible, containerOpacity]);
 
+  // Reset message index when modal becomes visible
+  useEffect(() => {
+    if (visible) {
+      setCurrentMessageIndex(0);
+    }
+  }, [visible]);
+
   // Cycle through messages
   useEffect(() => {
     if (!visible) {
@@ -75,6 +82,11 @@ export function SnappyLoading({ visible, onCancel }: SnappyLoadingProps) {
     opacity: opacity.value,
   }));
 
+  // Don't render Modal at all when not visible to prevent blocking touch events
+  if (!visible) {
+    return null;
+  }
+
   return (
     <Modal
       key={modalKey}
@@ -83,8 +95,8 @@ export function SnappyLoading({ visible, onCancel }: SnappyLoadingProps) {
       animationType="fade"
       statusBarTranslucent
       onRequestClose={onCancel || undefined}>
-      <View style={styles.overlay}>
-        <Animated.View style={[styles.container, containerAnimatedStyle]}>
+      <View style={styles.overlay} pointerEvents="box-none">
+        <Animated.View style={[styles.container, containerAnimatedStyle]} pointerEvents="auto">
           <View style={styles.imageContainer}>
             <Image
               source={require('@/assets/images/Snappy_Wave_Animation.png')}
