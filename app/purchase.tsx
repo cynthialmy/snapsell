@@ -12,7 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { initiateCreditPurchase, initiateProSubscription } from '@/utils/payments';
 
 export default function PurchaseScreen() {
@@ -22,7 +22,7 @@ export default function PurchaseScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('purchase');
+      // trackScreenView('purchase'); // Disabled - overloading activities
     }, [])
   );
 

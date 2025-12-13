@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { signInWithApple, signInWithGoogle, signUp } from '@/utils/auth';
 
 export default function SignUpScreen() {
@@ -30,7 +30,7 @@ export default function SignUpScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('sign-up');
+      // trackScreenView('sign-up'); // Disabled - overloading activities
     }, [])
   );
 

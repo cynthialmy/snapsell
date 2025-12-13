@@ -197,6 +197,7 @@ async function fetchWithTimeout(
   const controller = new AbortController();
 
   const timeoutId = setTimeout(() => {
+    console.log(`[API] Timeout reached (${timeoutMs}ms), aborting request`);
     controller.abort();
   }, timeoutMs);
 
@@ -206,18 +207,33 @@ async function fetchWithTimeout(
 
   if (signal) {
     if (signal.aborted) {
+      console.log('[API] User signal already aborted');
       cleanup();
       controller.abort();
     } else {
-      signal.addEventListener('abort', () => controller.abort(), { once: true });
+      signal.addEventListener('abort', () => {
+        console.log('[API] User signal aborted');
+        controller.abort();
+      }, { once: true });
     }
   }
 
   try {
-    return await fetch(input, {
+    console.log('[API] Starting fetch with timeout controller...');
+    const response = await fetch(input, {
       ...rest,
       signal: controller.signal,
     });
+    console.log('[API] Fetch completed, got response');
+    return response;
+  } catch (error: any) {
+    console.error('[API] Fetch error in fetchWithTimeout:', {
+      error: error?.message || String(error),
+      name: error?.name,
+      code: error?.code,
+      aborted: controller.signal.aborted,
+    });
+    throw error;
   } finally {
     cleanup();
   }
@@ -339,15 +355,28 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
       const timeoutMs = USE_EDGE_FUNCTION ? EDGE_FUNCTION_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
       console.log('[API] Making fetch request...');
       console.log(`[API] Timeout: ${timeoutMs}ms (${USE_EDGE_FUNCTION ? 'Edge Function' : 'Legacy backend'})`);
+
       // Pass user's abort signal to fetchWithTimeout
       // fetchWithTimeout will combine it with its own timeout signal
-      const response = await fetchWithTimeout(endpointUrl, {
-        method: 'POST',
-        body: formData,
-        headers,
-        timeoutMs,
-        signal: signal,
-      });
+      let response: Response;
+      try {
+        response = await fetchWithTimeout(endpointUrl, {
+          method: 'POST',
+          body: formData,
+          headers,
+          timeoutMs,
+          signal: signal,
+        });
+        console.log('[API] Fetch completed successfully');
+      } catch (fetchError: any) {
+        console.error('[API] Fetch failed:', {
+          error: fetchError?.message || String(fetchError),
+          name: fetchError?.name,
+          code: fetchError?.code,
+          stack: fetchError?.stack?.substring(0, 200),
+        });
+        throw fetchError;
+      }
 
       lastResponse = response;
       console.log(`[API] Response status: ${response.status} ${response.statusText}`);

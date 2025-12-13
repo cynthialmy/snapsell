@@ -1,5 +1,5 @@
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import {
   Pressable,
   ScrollView,
@@ -10,9 +10,10 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { getPaymentHistory, type PaymentHistoryItem } from '@/utils/payments';
+import { getStoredAnonymousQuota } from '@/utils/quota-storage';
 
 export default function UpgradeScreen() {
   const router = useRouter();
@@ -23,26 +24,43 @@ export default function UpgradeScreen() {
   const [paymentHistory, setPaymentHistory] = useState<PaymentHistoryItem[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [showSaveSlotsInfo, setShowSaveSlotsInfo] = useState(false);
+  const anonymousQuotaRef = useRef<AnonymousQuota | null>(null); // Use ref to avoid dependency issues
 
   const loadQuota = useCallback(async () => {
     setLoading(true);
 
     if (!user) {
-      // Load anonymous quota for non-logged-in users
-      try {
-        const { quota: anonQuota, error } = await checkAnonymousQuota();
-        if (error) {
-          console.error('[Upgrade] Error loading anonymous quota:', error);
+      // For anonymous users, load quota from AsyncStorage (from API responses)
+      // The backend /anonymous-quota endpoint doesn't track per-device quota,
+      // so it will always return stale data (10). We should only use quota
+      // from API responses (analyze-image endpoint), which tracks quota correctly.
+      const storedQuota = await getStoredAnonymousQuota();
+      if (storedQuota) {
+        setAnonymousQuota(storedQuota);
+        anonymousQuotaRef.current = storedQuota;
+      } else if (!anonymousQuotaRef.current) {
+        // Only fetch from backend if we don't have quota at all (initial load)
+        try {
+          const { quota: anonQuota, error } = await checkAnonymousQuota();
+          if (error) {
+            console.error('[Upgrade] Error loading anonymous quota:', error);
+            setAnonymousQuota(null);
+            anonymousQuotaRef.current = null;
+          } else {
+            setAnonymousQuota(anonQuota);
+            anonymousQuotaRef.current = anonQuota;
+          }
+        } catch (error) {
+          console.error('[Upgrade] Exception loading anonymous quota:', error);
           setAnonymousQuota(null);
-        } else {
-          setAnonymousQuota(anonQuota);
+          anonymousQuotaRef.current = null;
         }
-      } catch (error) {
-        console.error('[Upgrade] Exception loading anonymous quota:', error);
-        setAnonymousQuota(null);
-      } finally {
-        setLoading(false);
+      } else {
+        console.log('[Upgrade] Skipping anonymous quota refresh - using existing quota:', {
+          currentQuota: anonymousQuotaRef.current?.creations_remaining_today,
+        });
       }
+      setLoading(false);
       return;
     }
 
@@ -66,7 +84,7 @@ export default function UpgradeScreen() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user]); // Removed anonymousQuota from deps to prevent infinite loop
 
   const loadPaymentHistory = useCallback(async () => {
     if (!user) {
@@ -92,12 +110,13 @@ export default function UpgradeScreen() {
   // Reload quota and payment history when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('upgrade', { is_authenticated: !!user });
+      // trackScreenView('upgrade', { is_authenticated: !!user }); // Disabled - overloading activities
+      // For authenticated users, always refresh quota from backend when screen comes into focus
+      // For anonymous users, only load if we don't have quota yet (to avoid overwriting with stale data)
       loadQuota();
       loadPaymentHistory();
       // Note: refreshUser() is called automatically after payments in _layout.tsx
-      // No need to refresh on every focus - credits only change after payments
-    }, [loadQuota, loadPaymentHistory, user])
+    }, [loadQuota, loadPaymentHistory, user]) // Removed anonymousQuota from deps to prevent infinite loop
   );
 
 

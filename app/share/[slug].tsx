@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { formatListingText } from '@/utils/listingFormatter';
 import { getListingBySlug } from '@/utils/listings-api';
 
@@ -34,7 +34,7 @@ export default function SharedListingScreen() {
   useFocusEffect(
     useCallback(() => {
       if (params.slug) {
-        trackScreenView('share', { slug: params.slug });
+        // trackScreenView('share', { slug: params.slug }); // Disabled - overloading activities
       }
     }, [params.slug])
   );

@@ -21,7 +21,7 @@ import { BlockedQuotaModal } from '@/components/BlockedQuotaModal';
 import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackError, trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackError, trackEvent } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
@@ -142,10 +142,13 @@ export default function MyListingsScreen() {
         return null;
       } else if (userQuota) {
         setQuota(userQuota);
-        if (!userQuota.is_pro && userQuota.creations_remaining_today <= 2) {
+        // Check total remaining (free + purchased) for low quota nudge
+        const totalRemaining = userQuota.creations?.total_remaining ??
+          (userQuota.creations_remaining_today + userQuota.bonus_creations_remaining);
+        if (!userQuota.is_pro && totalRemaining <= 2) {
           trackEvent('low_quota_nudge_shown', {
             type: 'creation',
-            remaining: userQuota.creations_remaining_today,
+            remaining: totalRemaining,
           });
           setShowLowQuotaNudge(true);
         }
@@ -192,17 +195,24 @@ export default function MyListingsScreen() {
     try {
       if (user) {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
+
+        // Calculate total remaining creations (free + purchased)
+        const totalRemaining = currentQuota?.creations?.total_remaining ??
+          (currentQuota ? (currentQuota.creations_remaining_today + currentQuota.bonus_creations_remaining) : 0);
+
         trackEvent('quota_checked', {
           has_quota: !!currentQuota,
           creations_remaining: currentQuota?.creations_remaining_today,
+          total_remaining: totalRemaining,
           creations_daily_limit: currentQuota?.creations_daily_limit,
           save_slots_remaining: currentQuota?.save_slots_remaining,
           is_pro: currentQuota?.is_pro,
         });
 
-        if (!quotaError && currentQuota && !currentQuota.is_pro && currentQuota.creations_remaining_today === 0) {
+        if (!quotaError && currentQuota && !currentQuota.is_pro && totalRemaining === 0) {
           trackEvent('generate_blocked_no_quota', {
             creations_remaining: currentQuota.creations_remaining_today,
+            total_remaining: totalRemaining,
             creations_daily_limit: currentQuota.creations_daily_limit,
           });
           setIsAnalyzing(false);
@@ -274,10 +284,13 @@ export default function MyListingsScreen() {
         const updatedQuota = returnedQuota || await loadQuota();
         if (updatedQuota) {
           setQuota(updatedQuota);
-          if (!updatedQuota.is_pro && updatedQuota.creations_remaining_today <= 2) {
+          // Check total remaining (free + purchased) for low quota nudge
+          const totalRemaining = updatedQuota.creations?.total_remaining ??
+            (updatedQuota.creations_remaining_today + updatedQuota.bonus_creations_remaining);
+          if (!updatedQuota.is_pro && totalRemaining <= 2) {
             trackEvent('low_quota_nudge_shown', {
               type: 'creation',
-              remaining: updatedQuota.creations_remaining_today,
+              remaining: totalRemaining,
             });
             setShowLowQuotaNudge(true);
           }
@@ -473,15 +486,20 @@ export default function MyListingsScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('my-listings', { is_authenticated: !!user });
+      // trackScreenView('my-listings', { is_authenticated: !!user }); // Disabled - overloading activities
       // Add a small delay to ensure any pending saves have completed
       // This is especially important for auto-save which has a debounce
       const timer = setTimeout(() => {
         loadListings();
+        // Always refresh quota from backend when screen comes into focus
+        // This ensures quota is up-to-date after listing creation
+        if (user) {
+          loadQuota();
+        }
       }, 300);
 
       return () => clearTimeout(timer);
-    }, [loadListings, user])
+    }, [loadListings, loadQuota, user])
   );
 
   const handleRefresh = useCallback(() => {
@@ -679,8 +697,8 @@ export default function MyListingsScreen() {
           <BlockedQuotaModal
             visible={showBlockedModal}
             type="creation"
-            creationsRemaining={quota.creations_remaining_today}
-            creationsDailyLimit={quota.creations_daily_limit}
+            creationsRemaining={quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining)}
+            creationsDailyLimit={quota.creations?.daily_limit ?? quota.creations_daily_limit}
             onDismiss={() => setShowBlockedModal(false)}
             onPurchaseSuccess={() => {
               setShowBlockedModal(false);
@@ -689,7 +707,7 @@ export default function MyListingsScreen() {
           />
           <LowSlotsWarning
             visible={showLowQuotaNudge}
-            remaining={quota.creations_remaining_today}
+            remaining={quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining)}
             type="creation"
             onDismiss={() => setShowLowQuotaNudge(false)}
             onUpgrade={() => {

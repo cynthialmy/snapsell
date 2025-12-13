@@ -1,19 +1,19 @@
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    TextInput,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { signIn, signInWithApple, signInWithGoogle, signInWithMagicLink } from '@/utils/auth';
 
 export default function SignInScreen() {
@@ -29,7 +29,7 @@ export default function SignInScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('sign-in', { has_return_to: !!params.returnTo });
+      // trackScreenView('sign-in', { has_return_to: !!params.returnTo }); // Disabled - overloading activities
     }, [params.returnTo])
   );
 

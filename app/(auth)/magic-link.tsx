@@ -5,7 +5,7 @@ import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { trackScreenView } from '@/utils/analytics';
+// import { trackScreenView } from '@/utils/analytics'; // Disabled - overloading activities
 
 export default function MagicLinkScreen() {
   const router = useRouter();
@@ -15,7 +15,7 @@ export default function MagicLinkScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('magic-link');
+      // trackScreenView('magic-link'); // Disabled - overloading activities
     }, [])
   );
 

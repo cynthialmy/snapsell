@@ -20,12 +20,13 @@ import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { QuotaCounterPill } from '@/components/QuotaCounterPill';
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackError, trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackError, trackEvent } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
 import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
+import { getStoredAnonymousQuota, storeAnonymousQuota } from '@/utils/quota-storage';
 
 // Check if an error message looks technical (contains URLs, version numbers, technical jargon, etc.)
 function isTechnicalError(message: string): boolean {
@@ -111,6 +112,7 @@ export default function HomeScreen() {
   const [abortController, setAbortController] = useState<AbortController | null>(null);
   const previousQuotaRef = useRef<UserQuota | AnonymousQuota | null>(null);
   const quotaLoadingRef = useRef(false);
+  const quotaUpdatedFromResponseRef = useRef<number>(0); // Timestamp of last quota update from API response
 
   const ctaLabel = useMemo(
     () => (isAnalyzing ? 'Creating listing…' : 'Create Listing'),
@@ -129,8 +131,15 @@ export default function HomeScreen() {
       // Check quota if user is authenticated
       if (user) {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
+
+        // Calculate total remaining creations (free + purchased)
+        const totalRemaining = currentQuota?.creations?.total_remaining ??
+          (currentQuota ? (currentQuota.creations_remaining_today + currentQuota.bonus_creations_remaining) : 0);
+
         console.log('[Image Analysis] Quota BEFORE analysis:', {
           creations_remaining: currentQuota?.creations_remaining_today,
+          bonus_creations_remaining: currentQuota?.bonus_creations_remaining,
+          total_remaining: totalRemaining,
           creations_daily_limit: currentQuota?.creations_daily_limit,
           save_slots_remaining: currentQuota?.save_slots_remaining,
           is_pro: currentQuota?.is_pro,
@@ -138,17 +147,32 @@ export default function HomeScreen() {
         trackEvent('quota_checked', {
           has_quota: !!currentQuota,
           creations_remaining: currentQuota?.creations_remaining_today,
+          total_remaining: totalRemaining,
           creations_daily_limit: currentQuota?.creations_daily_limit,
           save_slots_remaining: currentQuota?.save_slots_remaining,
           is_pro: currentQuota?.is_pro,
         });
 
-        // Check if user can create (not Pro and no creations remaining)
-        if (!quotaError && currentQuota && !currentQuota.is_pro && currentQuota.creations_remaining_today === 0) {
+        // Check if user can create (not Pro and no total creations remaining)
+        if (!quotaError && currentQuota && !currentQuota.is_pro && totalRemaining === 0) {
           // Quota exceeded - show blocked modal
           trackEvent('generate_blocked_no_quota', {
             creations_remaining: currentQuota.creations_remaining_today,
+            total_remaining: totalRemaining,
             creations_daily_limit: currentQuota.creations_daily_limit,
+          });
+          setIsAnalyzing(false);
+          setShowBlockedModal(true);
+          return;
+        }
+      } else {
+        // Check quota for unauthenticated users
+        if (anonymousQuota && anonymousQuota.creations_remaining_today === 0) {
+          // Quota exceeded for anonymous user - show blocked modal
+          trackEvent('generate_blocked_no_quota', {
+            creations_remaining: anonymousQuota.creations_remaining_today,
+            creations_daily_limit: anonymousQuota.creations_daily_limit,
+            is_anonymous: true,
           });
           setIsAnalyzing(false);
           setShowBlockedModal(true);
@@ -233,27 +257,38 @@ export default function HomeScreen() {
       //                    save_slots_remaining, is_pro } (NO resets_at)
       // - Unauthenticated: Same as authenticated PLUS resets_at
       if (user) {
-        const updatedQuota = returnedQuota || await loadQuota();
-        if (updatedQuota) {
+        // IMPORTANT: Only use returnedQuota if it exists and is valid
+        // If returnedQuota is null/undefined, the backend didn't return updated quota
+        // In that case, we should NOT call loadQuota() immediately as it might return stale data
+        // Instead, we'll let useFocusEffect handle the refresh after a delay
+        if (returnedQuota) {
+          // Use quota from response - this is the updated quota after decrement
+          console.log('[Image Analysis] Using quota from API response:', {
+            creations_remaining: returnedQuota.creations_remaining_today,
+            save_slots_remaining: returnedQuota.save_slots_remaining,
+          });
+
           // Check if this is the first listing (quota went from 10 to 9)
           // Only show if user is not pro and had 10 remaining before
           const prevQuota = previousQuotaRef.current as UserQuota | null;
-          const isFirstListing = !updatedQuota.is_pro &&
+          const isFirstListing = !returnedQuota.is_pro &&
             prevQuota &&
             prevQuota.creations_remaining_today === 10 &&
-            updatedQuota.creations_remaining_today === 9;
+            returnedQuota.creations_remaining_today === 9;
 
           // Update quota state immediately
           console.log('[Image Analysis] Updating quota after analysis:', {
-            creations_remaining: updatedQuota.creations_remaining_today,
-            save_slots_remaining: updatedQuota.save_slots_remaining,
-            is_pro: updatedQuota.is_pro,
-            fromResponse: !!returnedQuota,
+            creations_remaining: returnedQuota.creations_remaining_today,
+            save_slots_remaining: returnedQuota.save_slots_remaining,
+            is_pro: returnedQuota.is_pro,
+            fromResponse: true,
             isFirstListing,
             previousRemaining: prevQuota?.creations_remaining_today,
           });
-          setQuota(updatedQuota);
-          previousQuotaRef.current = updatedQuota;
+          setQuota(returnedQuota);
+          previousQuotaRef.current = returnedQuota;
+          // Mark that quota was just updated from API response to prevent stale refresh
+          quotaUpdatedFromResponseRef.current = Date.now();
 
           // Show first listing celebration message
           if (isFirstListing) {
@@ -263,20 +298,22 @@ export default function HomeScreen() {
               [{ text: 'Got it!', style: 'default' }]
             );
             trackEvent('first_listing_created', {
-              creations_remaining: updatedQuota.creations_remaining_today,
+              creations_remaining: returnedQuota.creations_remaining_today,
             });
           }
 
           // Show low quota nudge if creations <= 2
-          if (!updatedQuota.is_pro && updatedQuota.creations_remaining_today <= 2) {
+          if (!returnedQuota.is_pro && returnedQuota.creations_remaining_today <= 2) {
             trackEvent('low_quota_nudge_shown', {
               type: 'creation',
-              remaining: updatedQuota.creations_remaining_today,
+              remaining: returnedQuota.creations_remaining_today,
             });
             setShowLowQuotaNudge(true);
           }
         } else {
-          console.warn('[Image Analysis] No quota returned from analysis or loadQuota');
+          // No quota in response - don't refresh immediately to avoid stale data
+          // The useFocusEffect will refresh it later when screen regains focus
+          console.log('[Image Analysis] No quota in API response, will refresh on next screen focus');
         }
       } else if (returnedQuota) {
         // For unauthenticated users, extract anonymous quota from response
@@ -319,6 +356,10 @@ export default function HomeScreen() {
         });
         setAnonymousQuota(anonymousQuotaData);
         previousQuotaRef.current = anonymousQuotaData;
+        // Store quota in AsyncStorage so other screens can access it
+        await storeAnonymousQuota(anonymousQuotaData);
+        // Mark that quota was just updated from API response (for anonymous users too)
+        quotaUpdatedFromResponseRef.current = Date.now();
 
         // Show first listing celebration message
         if (isFirstListing) {
@@ -583,11 +624,13 @@ export default function HomeScreen() {
         if (!previousQuotaRef.current || (prevUserQuota?.user_id === userQuota.user_id)) {
           previousQuotaRef.current = userQuota;
         }
-        // Show low quota nudge if creations <= 2
-        if (!userQuota.is_pro && userQuota.creations_remaining_today <= 2) {
+        // Show low quota nudge if total creations <= 2
+        const totalRemaining = userQuota.creations?.total_remaining ??
+          (userQuota.creations_remaining_today + userQuota.bonus_creations_remaining);
+        if (!userQuota.is_pro && totalRemaining <= 2) {
           trackEvent('low_quota_nudge_shown', {
             type: 'creation',
-            remaining: userQuota.creations_remaining_today,
+            remaining: totalRemaining,
           });
           setShowLowQuotaNudge(true);
         }
@@ -619,6 +662,17 @@ export default function HomeScreen() {
     quotaLoadingRef.current = true;
     setQuotaLoading(true);
     try {
+      // First, try to load quota from AsyncStorage (from API responses)
+      const storedQuota = await getStoredAnonymousQuota();
+      if (storedQuota) {
+        setAnonymousQuota(storedQuota);
+        previousQuotaRef.current = storedQuota;
+        quotaLoadingRef.current = false;
+        setQuotaLoading(false);
+        return storedQuota;
+      }
+
+      // If no stored quota, fetch from backend (only for initial load)
       const { quota: anonymousQuotaData, error } = await checkAnonymousQuota();
       if (error) {
         // Silently handle backend not configured or unavailable
@@ -639,17 +693,32 @@ export default function HomeScreen() {
       quotaLoadingRef.current = false;
       setQuotaLoading(false);
     }
-  }, [user]);
+  }, [user, anonymousQuota]);
 
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('home', { is_authenticated: !!user });
+      // trackScreenView('home', { is_authenticated: !!user }); // Disabled - overloading activities
+      // Refresh quota from backend when screen comes into focus
+      // But skip if quota was just updated from API response (within last 5 seconds)
+      // This prevents overwriting correct quota with stale backend data
+      // Note: Extended to 5 seconds for anonymous users since backend may return stale data
+      const timeSinceLastUpdate = Date.now() - quotaUpdatedFromResponseRef.current;
+      const shouldSkipRefresh = timeSinceLastUpdate < 5000; // 5 seconds
+
+      if (shouldSkipRefresh) {
+        console.log('[Home] Skipping quota refresh - quota was just updated from API response', {
+          timeSinceLastUpdate,
+          currentQuota: user ? quota?.creations_remaining_today : anonymousQuota?.creations_remaining_today,
+        });
+        return;
+      }
+
       if (user) {
         loadQuota();
       } else {
         loadAnonymousQuota();
       }
-    }, [loadQuota, loadAnonymousQuota, user]),
+    }, [loadQuota, loadAnonymousQuota, user]), // Removed quota and anonymousQuota from deps to prevent infinite loop
   );
 
   return (
@@ -725,29 +794,43 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
       <SnappyLoading visible={isAnalyzing} onCancel={isAnalyzing ? handleCancelAnalysis : undefined} />
-      {user && quota && (
+      {(user || !user) && (
         <>
           <BlockedQuotaModal
             visible={showBlockedModal}
             type="creation"
-            creationsRemaining={quota.creations_remaining_today}
-            creationsDailyLimit={quota.creations_daily_limit}
+            creationsRemaining={
+              user && quota
+                ? (quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining))
+                : (anonymousQuota?.creations_remaining_today ?? 0)
+            }
+            creationsDailyLimit={
+              user && quota
+                ? (quota.creations?.daily_limit ?? quota.creations_daily_limit)
+                : (anonymousQuota?.creations_daily_limit ?? 10)
+            }
             onDismiss={() => setShowBlockedModal(false)}
             onPurchaseSuccess={() => {
               setShowBlockedModal(false);
-              loadQuota();
+              if (user) {
+                loadQuota();
+              } else {
+                loadAnonymousQuota();
+              }
             }}
           />
-          <LowSlotsWarning
-            visible={showLowQuotaNudge}
-            remaining={quota.creations_remaining_today}
-            type="creation"
-            onDismiss={() => setShowLowQuotaNudge(false)}
-            onUpgrade={() => {
-              setShowLowQuotaNudge(false);
-              router.push('/(tabs)/upgrade');
-            }}
-          />
+          {user && quota && (
+            <LowSlotsWarning
+              visible={showLowQuotaNudge}
+              remaining={quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining)}
+              type="creation"
+              onDismiss={() => setShowLowQuotaNudge(false)}
+              onUpgrade={() => {
+                setShowLowQuotaNudge(false);
+                router.push('/(tabs)/upgrade');
+              }}
+            />
+          )}
         </>
       )}
     </SafeAreaView>

@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { signOut } from '@/utils/auth';
 import { checkQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
@@ -69,7 +69,9 @@ export default function SettingsScreen() {
   // Reload quota when screen comes into focus
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('settings', { is_authenticated: !!user });
+      // trackScreenView('settings', { is_authenticated: !!user }); // Disabled - overloading activities
+      // Always refresh quota from backend when screen comes into focus
+      // This ensures quota is up-to-date after listing creation
       loadQuota();
     }, [loadQuota, user])
   );

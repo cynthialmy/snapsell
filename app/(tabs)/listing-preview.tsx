@@ -27,7 +27,7 @@ import { QuotaModal } from '@/components/QuotaModal';
 import { SaveSlotsPaywall } from '@/components/SaveSlotsPaywall';
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackError, trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackError, trackEvent } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing, updateListing } from '@/utils/listings';
@@ -175,11 +175,11 @@ export default function ListingPreviewScreen() {
   // Track screen view
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('listing-preview', {
-        has_backend_id: !!backendListingId,
-        has_payload: !!payload,
-        has_listing_id: !!params.listingId,
-      });
+      // trackScreenView('listing-preview', { // Disabled - overloading activities
+      //   has_backend_id: !!backendListingId,
+      //   has_payload: !!payload,
+      //   has_listing_id: !!params.listingId,
+      // });
 
       // Refresh quota when screen comes into focus (e.g., after returning from save)
       if (user) {
@@ -1158,6 +1158,20 @@ export default function ListingPreviewScreen() {
                     setShowQuotaModal(true);
                   }
                 }
+
+                // Check if creations are exhausted after save (check total remaining)
+                const totalRemaining = updatedQuota.creations?.total_remaining ??
+                  (updatedQuota.creations_remaining_today + updatedQuota.bonus_creations_remaining);
+
+                if (!updatedQuota.is_pro && totalRemaining === 0) {
+                  trackEvent('generate_blocked_no_quota', {
+                    creations_remaining: updatedQuota.creations_remaining_today,
+                    total_remaining: totalRemaining,
+                    creations_daily_limit: updatedQuota.creations_daily_limit,
+                    context: 'after_save',
+                  });
+                  setShowBlockedModal(true);
+                }
               }
             } catch (quotaError) {
               console.warn('[Listing Save] Failed to check quota for modal:', quotaError);
@@ -1308,17 +1322,24 @@ export default function ListingPreviewScreen() {
     try {
       if (user) {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
+
+        // Calculate total remaining creations (free + purchased)
+        const totalRemaining = currentQuota?.creations?.total_remaining ??
+          (currentQuota ? (currentQuota.creations_remaining_today + currentQuota.bonus_creations_remaining) : 0);
+
         trackEvent('quota_checked', {
           has_quota: !!currentQuota,
           creations_remaining: currentQuota?.creations_remaining_today,
+          total_remaining: totalRemaining,
           creations_daily_limit: currentQuota?.creations_daily_limit,
           save_slots_remaining: currentQuota?.save_slots_remaining,
           is_pro: currentQuota?.is_pro,
         });
 
-        if (!quotaError && currentQuota && !currentQuota.is_pro && currentQuota.creations_remaining_today === 0) {
+        if (!quotaError && currentQuota && !currentQuota.is_pro && totalRemaining === 0) {
           trackEvent('generate_blocked_no_quota', {
             creations_remaining: currentQuota.creations_remaining_today,
+            total_remaining: totalRemaining,
             creations_daily_limit: currentQuota.creations_daily_limit,
           });
           setIsAnalyzing(false);
@@ -1388,12 +1409,31 @@ export default function ListingPreviewScreen() {
 
       if (user && returnedQuota) {
         setQuota(returnedQuota);
-        if (!returnedQuota.is_pro && returnedQuota.creations_remaining_today <= 2) {
-          trackEvent('low_quota_nudge_shown', {
-            type: 'creation',
-            remaining: returnedQuota.creations_remaining_today,
+
+        // Check if creations are exhausted after analysis (check total remaining)
+        const totalRemaining = returnedQuota.creations?.total_remaining ??
+          (returnedQuota.creations_remaining_today + returnedQuota.bonus_creations_remaining);
+
+        if (!returnedQuota.is_pro && totalRemaining === 0) {
+          trackEvent('generate_blocked_no_quota', {
+            creations_remaining: returnedQuota.creations_remaining_today,
+            total_remaining: totalRemaining,
+            creations_daily_limit: returnedQuota.creations_daily_limit,
+            context: 'after_analysis',
           });
-          setShowLowQuotaNudge(true);
+          setShowBlockedModal(true);
+        } else if (!returnedQuota.is_pro) {
+          // Check total remaining (free + purchased) for low quota nudge
+          const totalRemaining = returnedQuota.creations?.total_remaining ??
+            (returnedQuota.creations_remaining_today + returnedQuota.bonus_creations_remaining);
+
+          if (totalRemaining <= 2) {
+            trackEvent('low_quota_nudge_shown', {
+              type: 'creation',
+              remaining: totalRemaining,
+            });
+            setShowLowQuotaNudge(true);
+          }
         }
       }
     } catch (error) {
@@ -1965,7 +2005,7 @@ export default function ListingPreviewScreen() {
           <Pressable
             onPress={handleGoToMyListings}
             style={({ pressed }) => [styles.tertiaryButton, pressed ? styles.tertiaryButtonPressed : null]}>
-            <Text style={styles.tertiaryButtonText}>My Listings</Text>
+            <Text style={styles.tertiaryButtonText}>Done</Text>
           </Pressable>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -2037,8 +2077,8 @@ export default function ListingPreviewScreen() {
           <BlockedQuotaModal
             visible={showBlockedModal}
             type="creation"
-            creationsRemaining={quota.creations_remaining_today}
-            creationsDailyLimit={quota.creations_daily_limit}
+            creationsRemaining={quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining)}
+            creationsDailyLimit={quota.creations?.daily_limit ?? quota.creations_daily_limit}
             onDismiss={() => setShowBlockedModal(false)}
             onPurchaseSuccess={() => {
               setShowBlockedModal(false);
@@ -2052,7 +2092,7 @@ export default function ListingPreviewScreen() {
           />
           <LowSlotsWarning
             visible={showLowQuotaNudge}
-            remaining={quota.creations_remaining_today}
+            remaining={quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining)}
             type="creation"
             onDismiss={() => setShowLowQuotaNudge(false)}
             onUpgrade={() => {
@@ -2119,7 +2159,7 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 24,
-    paddingBottom: 48,
+    paddingBottom: 24,
     gap: 16,
   },
   eyebrow: {
@@ -2493,7 +2533,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tertiaryButton: {
-    marginTop: 12,
+    marginTop: 4,
     paddingVertical: 14,
     borderRadius: 14,
     alignItems: 'center',

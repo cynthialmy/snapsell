@@ -14,7 +14,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackEvent } from '@/utils/analytics';
 import { deleteAccount, getUserProfile, signOut, updateUserProfile } from '@/utils/auth';
 
 export default function ProfileScreen() {
@@ -28,7 +28,7 @@ export default function ProfileScreen() {
 
   useFocusEffect(
     useCallback(() => {
-      trackScreenView('profile');
+      // trackScreenView('profile'); // Disabled - overloading activities
     }, [])
   );
 
@@ -331,4 +331,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-

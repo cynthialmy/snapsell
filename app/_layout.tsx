@@ -38,6 +38,8 @@ function RootLayoutNav() {
     const onAuthCallback = segments[0] === 'auth' && segments[1] === 'callback';
     const onProfileScreen = segments[0] === 'profile';
     const onPurchaseScreen = segments[0] === 'purchase';
+    // Check if we're on the root index route (welcome page)
+    const onRootIndex = segments.length === 0 || (segments.length === 1 && segments[0] === 'index');
     // Check if we're on tabs index (first tab, which is the home screen)
     // When in tabs group with only one segment, we're on the index tab
     const onTabsIndex = inTabsGroup && segments.length === 1;
@@ -54,6 +56,12 @@ function RootLayoutNav() {
 
     // Don't interfere with purchase modal - allow it to be shown
     if (onPurchaseScreen) {
+      return;
+    }
+
+    // If on root index (welcome page), always redirect to tabs (which shows the same content)
+    if (onRootIndex && !inTabsGroup) {
+      router.replace('/(tabs)' as any);
       return;
     }
 
@@ -647,6 +655,13 @@ export default function RootLayout() {
         await SplashScreen.hideAsync();
         // Show the animated APNG splash
         setShowAnimatedSplash(true);
+
+        // Safety timeout: force dismiss splash after 5 seconds even if animation doesn't complete
+        const safetyTimeout = setTimeout(() => {
+          setShowAnimatedSplash(false);
+        }, 5000);
+
+        return () => clearTimeout(safetyTimeout);
       }
     }
 
@@ -671,7 +686,7 @@ export default function RootLayout() {
             <AnimatedSplash
               imageSource={require('@/assets/images/Snappy_Animation.png')}
               backgroundColor={colorScheme === 'dark' ? '#000000' : '#ffffff'}
-              duration={2500} // Show animation for 2.5 seconds
+              duration={1500} // Show animation for 1.5 seconds (reduced to prevent blocking)
               onAnimationComplete={handleAnimatedSplashComplete}
             />
           )}

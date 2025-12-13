@@ -6,9 +6,8 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 ## Currently Tracked Events
 
 ### Screen Views
-✅ **All major screens are tracked:**
-- `screen_viewed` - home, listing-preview, my-listings, settings, upgrade, purchase, profile
-- `screen_viewed` - sign-in, sign-up, magic-link, email-confirmation, share
+⚠️ **Screen view tracking is disabled** - Was overloading activities in PostHog
+- `screen_viewed` events have been disabled across all screens
 
 ### Navigation
 ✅ **Tab navigation:**
@@ -215,7 +214,7 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 ## Implementation Notes
 
 - All tracking uses `trackEvent()` from `utils/analytics.ts`
-- Screen views use `trackScreenView()` helper
+- Screen views are disabled (was overloading activities)
 - Tab switches use `trackTabSwitch()` helper
 - Error tracking uses `trackError()` function for critical errors
 - PostHog is initialized in `app/_layout.tsx`
@@ -229,10 +228,10 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 - Comprehensive authentication tracking
 - Good coverage of listing creation and editing
 - Purchase flow is well tracked with product selection
-- Screen views are tracked consistently
 - Error tracking is now implemented for critical errors
 - Modal interactions and dismissals are consistently tracked
 - UI interactions (dropdowns, toggles, buttons) are now tracked
+- Screen view tracking disabled to reduce activity overload
 
 **Remaining Gaps:**
 - Share link generation (if functionality exists, needs tracking)

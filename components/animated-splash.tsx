@@ -4,8 +4,7 @@ import { StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
-  withTiming,
+  withTiming
 } from 'react-native-reanimated';
 
 type AnimatedSplashProps = {
@@ -22,6 +21,7 @@ export function AnimatedSplash({
   duration = 2000, // Default 2 seconds
 }: AnimatedSplashProps) {
   const [isVisible, setIsVisible] = useState(true);
+  const [imageError, setImageError] = useState(false);
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.8);
 
@@ -41,8 +41,19 @@ export function AnimatedSplash({
       }, 300);
     }, duration);
 
-    return () => clearTimeout(timer);
-  }, [duration, onAnimationComplete, opacity, scale]);
+    // Safety timeout: ensure we always dismiss after duration + fade time + buffer
+    const safetyTimer = setTimeout(() => {
+      if (isVisible) {
+        setIsVisible(false);
+        onAnimationComplete();
+      }
+    }, duration + 1000); // Add 1 second buffer
+
+    return () => {
+      clearTimeout(timer);
+      clearTimeout(safetyTimer);
+    };
+  }, [duration, onAnimationComplete, opacity, scale, isVisible]);
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -85,5 +96,3 @@ const styles = StyleSheet.create({
     height: '100%',
   },
 });
-
-
