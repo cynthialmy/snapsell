@@ -24,6 +24,7 @@ type SnappyLoadingProps = {
 
 export function SnappyLoading({ visible, onCancel }: SnappyLoadingProps) {
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
+  const [modalKey, setModalKey] = useState(0);
   const opacity = useSharedValue(1);
   const containerOpacity = useSharedValue(0);
 
@@ -33,6 +34,12 @@ export function SnappyLoading({ visible, onCancel }: SnappyLoadingProps) {
       containerOpacity.value = withTiming(1, { duration: 300 });
     } else {
       containerOpacity.value = withTiming(0, { duration: 200 });
+      // Force modal remount when hiding to prevent stuck state
+      // Use a timeout to ensure the fade animation completes first
+      const timeoutId = setTimeout(() => {
+        setModalKey(prev => prev + 1);
+      }, 250);
+      return () => clearTimeout(timeoutId);
     }
   }, [visible, containerOpacity]);
 
@@ -68,16 +75,14 @@ export function SnappyLoading({ visible, onCancel }: SnappyLoadingProps) {
     opacity: opacity.value,
   }));
 
-  if (!visible) {
-    return null;
-  }
-
   return (
     <Modal
+      key={modalKey}
       transparent
       visible={visible}
       animationType="fade"
-      statusBarTranslucent>
+      statusBarTranslucent
+      onRequestClose={onCancel || undefined}>
       <View style={styles.overlay}>
         <Animated.View style={[styles.container, containerAnimatedStyle]}>
           <View style={styles.imageContainer}>

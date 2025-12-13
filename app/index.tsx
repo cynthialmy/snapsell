@@ -424,6 +424,7 @@ export default function HomeScreen() {
         setErrorMessage(transformErrorMessage(rawMessage));
       }
     } finally {
+      // Ensure loading state is cleared immediately to allow navigation
       setIsAnalyzing(false);
       setAbortController(null);
     }
@@ -434,6 +435,10 @@ export default function HomeScreen() {
       trackEvent('analysis_cancelled', { source: 'home' });
       abortController.abort();
       setAbortController(null);
+      setIsAnalyzing(false);
+      setErrorMessage(null);
+    } else {
+      // Defensive: ensure loading state is cleared even if abortController is null
       setIsAnalyzing(false);
       setErrorMessage(null);
     }
