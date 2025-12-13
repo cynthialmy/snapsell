@@ -70,14 +70,24 @@ These values are loaded both by the Expo app (for the API base URL) and the Fast
 
 **PostHog Analytics:** The app includes PostHog analytics to track user engagement and activation events. Configure PostHog credentials in your `.env` file. If not configured, analytics will be disabled. Events tracked include photo uploads, listing generation, copy actions, and API usage.
 
-**For EAS Production Builds:** When building with EAS (Expo Application Services), you must configure PostHog environment variables as EAS secrets. Set them using:
+**For EAS Production Builds:** When building with EAS (Expo Application Services), you must configure environment variables as EAS secrets. This includes both PostHog and Supabase configuration:
 
+**PostHog Analytics:**
 ```bash
 eas secret:create --scope project --name EXPO_PUBLIC_POSTHOG_API_KEY --value your_posthog_api_key_here
 eas secret:create --scope project --name EXPO_PUBLIC_POSTHOG_HOST --value https://us.i.posthog.com
 ```
 
-Alternatively, you can set them in the EAS dashboard under your project's secrets. These variables are automatically included in production builds. The PostHog SDK is configured with `flushAt: 1` and `flushInterval: 10000ms` to ensure events are sent immediately on production builds.
+**Supabase Configuration (Required for Edge Functions):**
+```bash
+eas secret:create --scope project --name EXPO_PUBLIC_SUPABASE_URL --value https://your-project.supabase.co
+eas secret:create --scope project --name EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY --value your_publishable_key_here
+eas secret:create --scope project --name EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL --value https://your-project.supabase.co/functions/v1
+```
+
+Alternatively, you can set them in the EAS dashboard under your project's secrets. These variables are automatically included in production builds.
+
+**Important:** Without these Supabase environment variables, the app will not be able to call Edge Functions on real devices, and features like quota checking and image analysis will fail. The PostHog SDK is configured with `flushAt: 1` and `flushInterval: 10000ms` to ensure events are sent immediately on production builds.
 
 **Debug Mode:** To enable verbose PostHog logging, set `EXPO_PUBLIC_POSTHOG_DEBUG=true` in your environment variables (useful for troubleshooting).
 

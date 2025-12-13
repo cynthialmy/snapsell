@@ -25,18 +25,20 @@ export default function UpgradeScreen() {
   const [showSaveSlotsInfo, setShowSaveSlotsInfo] = useState(false);
 
   const loadQuota = useCallback(async () => {
+    setLoading(true);
+
     if (!user) {
       // Load anonymous quota for non-logged-in users
       try {
         const { quota: anonQuota, error } = await checkAnonymousQuota();
         if (error) {
-          console.error('Error loading anonymous quota:', error);
+          console.error('[Upgrade] Error loading anonymous quota:', error);
           setAnonymousQuota(null);
         } else {
           setAnonymousQuota(anonQuota);
         }
       } catch (error) {
-        console.error('Error loading anonymous quota:', error);
+        console.error('[Upgrade] Exception loading anonymous quota:', error);
         setAnonymousQuota(null);
       } finally {
         setLoading(false);
@@ -48,10 +50,10 @@ export default function UpgradeScreen() {
     try {
       const { quota: userQuota, error } = await checkQuota();
       if (error) {
-        console.error('Error loading quota:', error);
+        console.error('[Upgrade] Error loading quota:', error);
         // If it's a 500 error, it's a backend issue - don't show quota but don't block the UI
         if (error.status === 500) {
-          console.warn('Backend quota endpoint is returning 500 error. This is a backend SQL issue that needs to be fixed.');
+          console.warn('[Upgrade] Backend quota endpoint is returning 500 error. This is a backend SQL issue that needs to be fixed.');
         }
         // Set quota to null so UI doesn't show incorrect data
         setQuota(null);
@@ -59,7 +61,7 @@ export default function UpgradeScreen() {
         setQuota(userQuota);
       }
     } catch (error) {
-      console.error('Error loading quota:', error);
+      console.error('[Upgrade] Exception loading quota:', error);
       setQuota(null);
     } finally {
       setLoading(false);

@@ -6,17 +6,17 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert,
-  KeyboardAvoidingView,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Switch,
-  Text,
-  TextInput,
-  TouchableOpacity,
-  View,
+    Alert,
+    KeyboardAvoidingView,
+    Platform,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Switch,
+    Text,
+    TextInput,
+    TouchableOpacity,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -84,6 +84,7 @@ export default function ListingPreviewScreen() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   // Auto-save checkbox state
   const [autoSaveListing, setAutoSaveListing] = useState(false);
@@ -1264,6 +1265,10 @@ export default function ListingPreviewScreen() {
     setIsAnalyzing(true);
     setErrorMessage(null);
 
+    // Create abort controller for cancellation
+    const controller = new AbortController();
+    setAbortController(controller);
+
     try {
       if (user) {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
@@ -1295,6 +1300,7 @@ export default function ListingPreviewScreen() {
         mimeType: asset.mimeType ?? 'image/jpeg',
         currency,
         onStatusChange: setErrorMessage,
+        signal: controller.signal,
       });
 
       const { formatListingText } = await import('@/utils/listingFormatter');
@@ -1355,6 +1361,13 @@ export default function ListingPreviewScreen() {
         }
       }
     } catch (error) {
+      // Check if this is a cancellation (not an error)
+      if (error instanceof Error && error.name === 'CancelledError') {
+        console.log('[Image Analysis] Analysis cancelled by user');
+        setErrorMessage(null);
+        return;
+      }
+
       const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
       const errorCode = (error as any)?.code;
 
@@ -1369,6 +1382,16 @@ export default function ListingPreviewScreen() {
       }
     } finally {
       setIsAnalyzing(false);
+      setAbortController(null);
+    }
+  };
+
+  const handleCancelAnalysis = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setIsAnalyzing(false);
+      setErrorMessage(null);
     }
   };
 
@@ -1957,7 +1980,7 @@ export default function ListingPreviewScreen() {
         }}
       />
 
-      <SnappyLoading visible={isAnalyzing} />
+      <SnappyLoading visible={isAnalyzing} onCancel={isAnalyzing ? handleCancelAnalysis : undefined} />
       {user && quota && (
         <>
           <BlockedQuotaModal

@@ -5,15 +5,15 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
-  Image,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
+    Alert,
+    Image,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -52,6 +52,7 @@ export default function MyListingsScreen() {
   const [quota, setQuota] = useState<UserQuota | null>(null);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   const ctaLabel = useMemo(
     () => (isAnalyzing ? 'Creating listing…' : 'Create Listing'),
@@ -148,6 +149,10 @@ export default function MyListingsScreen() {
     setIsAnalyzing(true);
     setErrorMessage(null);
 
+    // Create abort controller for cancellation
+    const controller = new AbortController();
+    setAbortController(controller);
+
     try {
       if (user) {
         const { quota: currentQuota, error: quotaError } = await checkQuota();
@@ -179,6 +184,7 @@ export default function MyListingsScreen() {
         mimeType: asset.mimeType ?? 'image/jpeg',
         currency,
         onStatusChange: setErrorMessage,
+        signal: controller.signal,
       });
 
       const formattedText = formatListingText({ ...listing, currency });
@@ -242,6 +248,13 @@ export default function MyListingsScreen() {
         }
       }
     } catch (error) {
+      // Check if this is a cancellation (not an error)
+      if (error instanceof Error && error.name === 'CancelledError') {
+        console.log('[Image Analysis] Analysis cancelled by user');
+        setErrorMessage(null);
+        return;
+      }
+
       const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
       const errorCode = (error as any)?.code;
 
@@ -256,6 +269,16 @@ export default function MyListingsScreen() {
       }
     } finally {
       setIsAnalyzing(false);
+      setAbortController(null);
+    }
+  };
+
+  const handleCancelAnalysis = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setIsAnalyzing(false);
+      setErrorMessage(null);
     }
   };
 
@@ -609,7 +632,7 @@ export default function MyListingsScreen() {
           {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
         </View>
       )}
-      <SnappyLoading visible={isAnalyzing} />
+      <SnappyLoading visible={isAnalyzing} onCancel={isAnalyzing ? handleCancelAnalysis : undefined} />
       {user && quota && (
         <>
           <BlockedQuotaModal

@@ -4,14 +4,14 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  View,
+    Alert,
+    Platform,
+    Pressable,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -73,6 +73,7 @@ export default function HomeScreen() {
   const [quotaLoading, setQuotaLoading] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
+  const [abortController, setAbortController] = useState<AbortController | null>(null);
 
   const ctaLabel = useMemo(
     () => (isAnalyzing ? 'Creating listing…' : 'Create Listing'),
@@ -82,6 +83,10 @@ export default function HomeScreen() {
   const processImage = async (asset: ImagePicker.ImagePickerAsset) => {
     setIsAnalyzing(true);
     setErrorMessage(null);
+
+    // Create abort controller for cancellation
+    const controller = new AbortController();
+    setAbortController(controller);
 
     try {
       // Check quota if user is authenticated
@@ -123,6 +128,7 @@ export default function HomeScreen() {
         mimeType: asset.mimeType ?? 'image/jpeg',
         currency,
         onStatusChange: setErrorMessage,
+        signal: controller.signal,
       });
 
       // Track successful listing generation
@@ -210,6 +216,13 @@ export default function HomeScreen() {
         }
       }
     } catch (error) {
+      // Check if this is a cancellation (not an error)
+      if (error instanceof Error && error.name === 'CancelledError') {
+        console.log('[Image Analysis] Analysis cancelled by user');
+        setErrorMessage(null);
+        return;
+      }
+
       const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
       const errorCode = (error as any)?.code;
 
@@ -225,6 +238,16 @@ export default function HomeScreen() {
       }
     } finally {
       setIsAnalyzing(false);
+      setAbortController(null);
+    }
+  };
+
+  const handleCancelAnalysis = () => {
+    if (abortController) {
+      abortController.abort();
+      setAbortController(null);
+      setIsAnalyzing(false);
+      setErrorMessage(null);
     }
   };
 
@@ -487,7 +510,7 @@ export default function HomeScreen() {
           {errorMessage ? <Text style={styles.error}>{errorMessage}</Text> : null}
         </View>
       </ScrollView>
-      <SnappyLoading visible={isAnalyzing} />
+      <SnappyLoading visible={isAnalyzing} onCancel={isAnalyzing ? handleCancelAnalysis : undefined} />
       {user && quota && (
         <>
           <BlockedQuotaModal

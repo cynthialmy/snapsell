@@ -1,11 +1,11 @@
 import { Image } from 'expo-image';
 import { useEffect, useState } from 'react';
-import { Modal, StyleSheet, View } from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import Animated, {
-  useAnimatedStyle,
-  useSharedValue,
-  withSequence,
-  withTiming,
+    useAnimatedStyle,
+    useSharedValue,
+    withSequence,
+    withTiming,
 } from 'react-native-reanimated';
 
 const MESSAGES = [
@@ -19,9 +19,10 @@ const MESSAGE_INTERVAL = 2500; // Change message every 2.5 seconds
 
 type SnappyLoadingProps = {
   visible: boolean;
+  onCancel?: () => void;
 };
 
-export function SnappyLoading({ visible }: SnappyLoadingProps) {
+export function SnappyLoading({ visible, onCancel }: SnappyLoadingProps) {
   const [currentMessageIndex, setCurrentMessageIndex] = useState(0);
   const opacity = useSharedValue(1);
   const containerOpacity = useSharedValue(0);
@@ -90,6 +91,16 @@ export function SnappyLoading({ visible }: SnappyLoadingProps) {
           <Animated.Text style={[styles.message, messageAnimatedStyle]}>
             {MESSAGES[currentMessageIndex]}
           </Animated.Text>
+          {onCancel && (
+            <Pressable
+              onPress={onCancel}
+              style={({ pressed }) => [
+                styles.cancelButton,
+                pressed && styles.cancelButtonPressed,
+              ]}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </Pressable>
+          )}
         </Animated.View>
       </View>
     </Modal>
@@ -131,5 +142,23 @@ const styles = StyleSheet.create({
     color: '#0F172A',
     fontWeight: '500',
     textAlign: 'center',
+  },
+  cancelButton: {
+    marginTop: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    backgroundColor: '#F1F5F9',
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  cancelButtonPressed: {
+    opacity: 0.7,
+    backgroundColor: '#E2E8F0',
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: '#64748B',
+    fontWeight: '600',
   },
 });

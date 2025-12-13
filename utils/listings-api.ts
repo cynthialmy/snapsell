@@ -26,10 +26,14 @@ const EDGE_FUNCTION_BASE = EDGE_FUNCTION_BASE_RAW
 // Validate configuration (but don't throw in production to allow graceful degradation)
 if (!EDGE_FUNCTION_BASE) {
   console.warn(
-    'Missing Supabase configuration. Please set EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL in your environment variables.'
+    '[Config] Missing Supabase configuration. Please set EXPO_PUBLIC_SUPABASE_URL or EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL in your environment variables.'
   );
+  console.warn('[Config] EXPO_PUBLIC_SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL || 'NOT SET');
+  console.warn('[Config] EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL:', process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL || 'NOT SET');
 } else {
   console.log('[Config] Edge Function Base URL:', EDGE_FUNCTION_BASE);
+  console.log('[Config] EXPO_PUBLIC_SUPABASE_URL:', SUPABASE_URL || 'NOT SET');
+  console.log('[Config] EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL:', process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL || 'NOT SET (using derived from SUPABASE_URL)');
 }
 
 // ============================================
@@ -602,6 +606,31 @@ export interface UserQuota {
   resets_at: string;
 }
 
+// Helper function for fetch with timeout
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = 10000
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const response = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    return response;
+  } catch (error: any) {
+    clearTimeout(timeoutId);
+    if (error.name === 'AbortError') {
+      throw new Error(`Request timeout after ${timeoutMs}ms`);
+    }
+    throw error;
+  }
+}
+
 /**
  * Check anonymous quota (for non-logged-in users)
  * Uses /anonymous-quota endpoint
@@ -610,16 +639,22 @@ export async function checkAnonymousQuota(): Promise<{ quota: AnonymousQuota | n
   try {
     // Check if Edge Function URL is configured
     if (!EDGE_FUNCTION_BASE || EDGE_FUNCTION_BASE.includes('YOUR_') || EDGE_FUNCTION_BASE.includes('your_')) {
-      // Backend not configured yet - return null quota silently
+      console.warn('[Quota] Backend not configured - EDGE_FUNCTION_BASE is missing or invalid');
       return { quota: null, error: { message: 'Backend not configured' } };
     }
 
-    const response = await fetch(`${EDGE_FUNCTION_BASE}/anonymous-quota`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
+    console.log('[Quota] Checking anonymous quota at:', `${EDGE_FUNCTION_BASE}/anonymous-quota`);
+
+    const response = await fetchWithTimeout(
+      `${EDGE_FUNCTION_BASE}/anonymous-quota`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
       },
-    });
+      10000 // 10 second timeout
+    );
 
     if (!response.ok) {
       // Try to parse error, but handle cases where response isn't JSON
@@ -650,17 +685,21 @@ export async function checkAnonymousQuota(): Promise<{ quota: AnonymousQuota | n
     const data: AnonymousQuota = await response.json();
     return { quota: data, error: null };
   } catch (error: any) {
-    // Don't log network errors or backend unavailable errors - these are expected during setup
     const errorMessage = error?.message || 'Failed to check anonymous quota';
     const isNetworkError = errorMessage.includes('fetch') ||
       errorMessage.includes('network') ||
-      errorMessage.includes('Failed to fetch');
+      errorMessage.includes('Failed to fetch') ||
+      errorMessage.includes('timeout') ||
+      errorMessage.includes('AbortError');
 
-    if (!isNetworkError) {
-      console.warn('Check anonymous quota error:', errorMessage);
-    }
+    // Always log errors for debugging on real devices
+    console.error('[Quota] Anonymous quota check failed:', {
+      message: errorMessage,
+      isNetworkError,
+      edgeFunctionBase: EDGE_FUNCTION_BASE,
+    });
 
-    return { quota: null, error: { message: errorMessage } };
+    return { quota: null, error: { message: errorMessage, isNetworkError } };
   }
 }
 
@@ -672,22 +711,29 @@ export async function checkQuota(): Promise<{ quota: UserQuota | null; error: an
   try {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session) {
+      console.warn('[Quota] No session found - user not authenticated');
       return { quota: null, error: { message: 'Not authenticated' } };
     }
 
     // Check if Edge Function URL is configured
     if (!EDGE_FUNCTION_BASE || EDGE_FUNCTION_BASE.includes('YOUR_') || EDGE_FUNCTION_BASE.includes('your_')) {
-      // Backend not configured yet - return null quota silently
+      console.warn('[Quota] Backend not configured - EDGE_FUNCTION_BASE is missing or invalid');
       return { quota: null, error: { message: 'Backend not configured' } };
     }
 
-    const response = await fetch(`${EDGE_FUNCTION_BASE}/user-quota`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${session.access_token}`,
+    console.log('[Quota] Checking user quota at:', `${EDGE_FUNCTION_BASE}/user-quota`);
+
+    const response = await fetchWithTimeout(
+      `${EDGE_FUNCTION_BASE}/user-quota`,
+      {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${session.access_token}`,
+        },
       },
-    });
+      10000 // 10 second timeout
+    );
 
     if (!response.ok) {
       // Try to parse error, but handle cases where response isn't JSON
@@ -716,19 +762,24 @@ export async function checkQuota(): Promise<{ quota: UserQuota | null; error: an
     }
 
     const data: UserQuota = await response.json();
+    console.log('[Quota] Successfully retrieved user quota');
     return { quota: data, error: null };
   } catch (error: any) {
-    // Don't log network errors or backend unavailable errors - these are expected during setup
     const errorMessage = error?.message || 'Failed to check quota';
     const isNetworkError = errorMessage.includes('fetch') ||
       errorMessage.includes('network') ||
-      errorMessage.includes('Failed to fetch');
+      errorMessage.includes('Failed to fetch') ||
+      errorMessage.includes('timeout') ||
+      errorMessage.includes('AbortError');
 
-    if (!isNetworkError) {
-      console.warn('Check quota error:', errorMessage);
-    }
+    // Always log errors for debugging on real devices
+    console.error('[Quota] User quota check failed:', {
+      message: errorMessage,
+      isNetworkError,
+      edgeFunctionBase: EDGE_FUNCTION_BASE,
+    });
 
-    return { quota: null, error: { message: errorMessage } };
+    return { quota: null, error: { message: errorMessage, isNetworkError } };
   }
 }
 

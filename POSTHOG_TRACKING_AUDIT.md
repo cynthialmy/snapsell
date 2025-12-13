@@ -206,3 +206,4 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 - Some UI interactions (dropdowns, toggles) are not tracked
 - Share link generation (if exists) is not tracked
 - Some button clicks in settings screen are not tracked
+

@@ -28,6 +28,7 @@ type AnalyzeOptions = {
   model?: string;
   currency?: string;
   onStatusChange?: (message: string | null) => void;
+  signal?: AbortSignal;
 };
 
 const HOSTED_BACKEND_URL = 'https://snapsell-backend.onrender.com';
@@ -97,6 +98,13 @@ function isLoopbackUrl(value: string): boolean {
 const API_URL = getApiUrl();
 const EDGE_FUNCTION_URL = getEdgeFunctionUrl();
 const USE_EDGE_FUNCTION = EDGE_FUNCTION_URL !== null;
+
+// Log configuration at module load time for debugging
+console.log('[API Config] API_URL:', API_URL);
+console.log('[API Config] EDGE_FUNCTION_URL:', EDGE_FUNCTION_URL);
+console.log('[API Config] USE_EDGE_FUNCTION:', USE_EDGE_FUNCTION);
+console.log('[API Config] EXPO_PUBLIC_SUPABASE_URL:', process.env.EXPO_PUBLIC_SUPABASE_URL || 'NOT SET');
+console.log('[API Config] EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL:', process.env.EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL || 'NOT SET');
 
 // Helper function to check if an error is retryable
 function isRetryableError(error: unknown, response?: Response): boolean {
@@ -219,6 +227,7 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
     model,
     currency,
     onStatusChange,
+    signal,
   } = options;
 
   const maxAttempts = 3; // 1 initial + 2 retries
@@ -234,10 +243,13 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
         ? `${EDGE_FUNCTION_URL}/analyze-image`
         : `${API_URL}/api/analyze-image`;
 
-      console.log('Uploading image to:', endpointUrl);
-      console.log('Platform:', Platform.OS);
+      console.log('[API] Uploading image to:', endpointUrl);
+      console.log('[API] Platform:', Platform.OS);
+      console.log('[API] Using Edge Function:', USE_EDGE_FUNCTION);
+      console.log('[API] Edge Function URL:', EDGE_FUNCTION_URL);
+      console.log('[API] API URL:', API_URL);
       if (attempt > 1) {
-        console.log(`Retry attempt ${attempt - 1} of ${maxAttempts - 1}`);
+        console.log(`[API] Retry attempt ${attempt - 1} of ${maxAttempts - 1}`);
       }
 
       // Create FormData fresh for each attempt to avoid any potential issues
@@ -280,11 +292,14 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
             authHeaders = {
               Authorization: `Bearer ${session.access_token}`,
             };
+            console.log('[API] Auth token found, length:', session.access_token.length);
+          } else {
+            console.log('[API] No session found, proceeding without auth');
           }
           // If no session, don't include auth header - backend should allow unauthenticated access
         } catch (authError) {
           // Silently fail - Edge Function should work without auth for analyze-image
-          console.warn('Failed to get auth token (continuing without auth):', authError);
+          console.warn('[API] Failed to get auth token (continuing without auth):', authError);
         }
       }
 
@@ -299,15 +314,20 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
         // FormData will be handled automatically by fetch on web
       }
 
+      console.log('[API] Making fetch request...');
+      // Pass user's abort signal to fetchWithTimeout
+      // fetchWithTimeout will combine it with its own timeout signal
       const response = await fetchWithTimeout(endpointUrl, {
         method: 'POST',
         body: formData,
         headers,
         timeoutMs: REQUEST_TIMEOUT_MS,
+        signal: signal,
       });
 
       lastResponse = response;
       console.log(`[API] Response status: ${response.status} ${response.statusText}`);
+      console.log(`[API] Response headers:`, Object.fromEntries(response.headers.entries()));
 
       if (!response.ok) {
         // Try to parse error response as JSON (Supabase Edge Functions return JSON errors)
@@ -388,6 +408,14 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
       console.log(`[API] Error on attempt ${attempt}/${maxAttempts}:`, errorMessage);
+
+      // Check if this is a user cancellation (not a timeout)
+      if (isAbortError(error) && signal?.aborted) {
+        console.log('[API] Request cancelled by user');
+        const cancelError = new Error('Analysis cancelled');
+        cancelError.name = 'CancelledError';
+        throw cancelError;
+      }
 
       if (isAbortError(error)) {
         const timeoutMessage = getRandomTimeoutMessage();
