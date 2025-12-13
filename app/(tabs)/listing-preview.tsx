@@ -7,7 +7,6 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
-  InteractionManager,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -1602,60 +1601,76 @@ export default function ListingPreviewScreen() {
   };
 
   const handleReset = () => {
-    setCopySuccess(false);
-    trackEvent('add_next_item_clicked', { source: 'listing-preview' });
+    try {
+      // Dismiss any visible modals first
+      setShowQuotaModal(false);
+      setShowPaywall(false);
+      setShowBlockedModal(false);
+      setShowBlockedSaveModal(false);
+      setShowLowSlotsWarning(false);
+      setShowLowQuotaNudge(false);
+      setShowLoginGate(false);
+      setCopySuccess(false);
 
-    // Dismiss any visible modals first
-    setShowQuotaModal(false);
-    setShowPaywall(false);
-    setShowBlockedModal(false);
-    setShowBlockedSaveModal(false);
-    setShowLowSlotsWarning(false);
-    setShowLowQuotaNudge(false);
-    setShowLoginGate(false);
+      trackEvent('add_next_item_clicked', { source: 'listing-preview' });
 
-    // Use InteractionManager to ensure navigation happens after current render cycle
-    // Add a small delay to ensure state updates complete and modals are dismissed
-    InteractionManager.runAfterInteractions(() => {
-      setTimeout(() => {
+      // Navigate immediately - no delays or complex timing
+      handlePickImage();
+    } catch (error) {
+      console.error('[Navigation] Error in handleReset:', error);
+      // Fallback: try navigation anyway
+      try {
         handlePickImage();
-      }, 50);
-    });
+      } catch (fallbackError) {
+        console.error('[Navigation] Fallback navigation also failed:', fallbackError);
+      }
+    }
   };
 
   const handleGoToMyListings = () => {
-    trackEvent('go_to_my_listings_clicked', { source: 'listing-preview' });
+    console.log('[Navigation] handleGoToMyListings called');
+    try {
+      // Dismiss any visible modals first
+      console.log('[Navigation] Dismissing modals...');
+      setShowQuotaModal(false);
+      setShowPaywall(false);
+      setShowBlockedModal(false);
+      setShowBlockedSaveModal(false);
+      setShowLowSlotsWarning(false);
+      setShowLowQuotaNudge(false);
+      setShowLoginGate(false);
 
-    // Dismiss any visible modals first
-    setShowQuotaModal(false);
-    setShowPaywall(false);
-    setShowBlockedModal(false);
-    setShowBlockedSaveModal(false);
-    setShowLowSlotsWarning(false);
-    setShowLowQuotaNudge(false);
-    setShowLoginGate(false);
+      console.log('[Navigation] Tracking event...');
+      trackEvent('go_to_my_listings_clicked', { source: 'listing-preview' });
 
-    // Use InteractionManager to ensure navigation happens after current render cycle
-    // Add a small delay to ensure state updates complete and modals are dismissed
-    // Use a flag to prevent double navigation
-    let navigationTriggered = false;
-    const triggerNavigation = () => {
-      if (!navigationTriggered) {
-        navigationTriggered = true;
-        router.push('/(tabs)/my-listings');
-      }
-    };
-
-    InteractionManager.runAfterInteractions(() => {
+      // Use setTimeout(0) to ensure navigation happens after state updates complete
+      console.log('[Navigation] Scheduling navigation...');
       setTimeout(() => {
-        triggerNavigation();
-      }, 50);
-    });
-
-    // Fallback: ensure navigation happens even if InteractionManager doesn't trigger quickly
-    setTimeout(() => {
-      triggerNavigation();
-    }, 200);
+        try {
+          console.log('[Navigation] Attempting navigation to my-listings...');
+          router.replace('/(tabs)/my-listings');
+          console.log('[Navigation] Navigation call completed');
+        } catch (navError) {
+          console.error('[Navigation] Navigation error:', navError);
+          // Fallback: try push instead of replace
+          try {
+            console.log('[Navigation] Trying fallback navigation with push...');
+            router.push('/(tabs)/my-listings');
+          } catch (fallbackError) {
+            console.error('[Navigation] Fallback navigation also failed:', fallbackError);
+            // Last resort: try navigating to home first
+            try {
+              console.log('[Navigation] Trying last resort navigation to tabs...');
+              router.replace('/(tabs)');
+            } catch (lastResortError) {
+              console.error('[Navigation] Last resort navigation failed:', lastResortError);
+            }
+          }
+        }
+      }, 0);
+    } catch (error) {
+      console.error('[Navigation] Error in handleGoToMyListings:', error);
+    }
   };
 
   const handleLocateMe = async () => {
