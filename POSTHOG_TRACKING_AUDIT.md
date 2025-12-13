@@ -54,10 +54,11 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 - `listings_refreshed` - when my-listings screen refreshes
 
 ✅ **Listing Actions:**
-- `add_next_item_clicked` - from listing-preview
+- `add_next_item_clicked` - from listing-preview (this is the create listing button in listing-preview)
 - `go_to_my_listings_clicked` - from listing-preview
 - `location_button_pressed` - when user requests location
-- `create_listing_from_empty_state` - when creating from empty my-listings state
+- `create_listing_from_empty_state` - when creating from empty my-listings state (this is the create listing button in my-listings)
+- `analysis_cancelled` - when user cancels image analysis during processing
 
 ### Save & Auto-Save
 ✅ **Save Functionality:**
@@ -166,6 +167,21 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 **Status:** Tracked via screen_viewed
 **Note:** This is tracked, but consider adding context about how user arrived (from home, from my-listings, etc.)
 
+### 11. Analysis Cancellation ⚠️
+**Status:** ✅ Fixed - Now tracked
+**Location:**
+- `app/index.tsx` - `handleCancelAnalysis()` (home screen)
+- `app/(tabs)/my-listings.tsx` - `handleCancelAnalysis()` (my-listings screen)
+- `app/(tabs)/listing-preview.tsx` - `handleCancelAnalysis()` (listing-preview screen)
+**Note:** `analysis_cancelled` event is now tracked with source (home/my-listings/listing-preview) when user cancels analysis.
+
+### 12. Create Listing Buttons ✅
+**Status:** Already tracked
+**Note:**
+- Create listing button in my-listings (empty state) is tracked via `create_listing_from_empty_state`
+- Create listing button in listing-preview ("Add next item") is tracked via `add_next_item_clicked`
+- No additional tracking needed as these are the only create listing buttons that exist
+
 ## Recommendations
 
 ### High Priority
@@ -206,4 +222,3 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 - Some UI interactions (dropdowns, toggles) are not tracked
 - Share link generation (if exists) is not tracked
 - Some button clicks in settings screen are not tracked
-

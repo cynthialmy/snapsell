@@ -5,15 +5,15 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-    Alert,
-    Image,
-    Platform,
-    Pressable,
-    RefreshControl,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View
+  Alert,
+  Image,
+  Platform,
+  Pressable,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -275,6 +275,7 @@ export default function MyListingsScreen() {
 
   const handleCancelAnalysis = () => {
     if (abortController) {
+      trackEvent('analysis_cancelled', { source: 'my-listings' });
       abortController.abort();
       setAbortController(null);
       setIsAnalyzing(false);

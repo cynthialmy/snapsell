@@ -244,6 +244,7 @@ export default function HomeScreen() {
 
   const handleCancelAnalysis = () => {
     if (abortController) {
+      trackEvent('analysis_cancelled', { source: 'home' });
       abortController.abort();
       setAbortController(null);
       setIsAnalyzing(false);

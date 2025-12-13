@@ -1388,6 +1388,7 @@ export default function ListingPreviewScreen() {
 
   const handleCancelAnalysis = () => {
     if (abortController) {
+      trackEvent('analysis_cancelled', { source: 'listing-preview' });
       abortController.abort();
       setAbortController(null);
       setIsAnalyzing(false);
