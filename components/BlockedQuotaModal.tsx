@@ -140,7 +140,13 @@ export function BlockedQuotaModal({
       onRequestClose={onDismiss}
       statusBarTranslucent>
       <View style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={onDismiss} />
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => {
+            trackEvent('blocked_quota_modal_dismissed', { type, action: 'backdrop' });
+            onDismiss();
+          }}
+        />
         <SafeAreaView style={styles.modalContainer} edges={['bottom']}>
           <View style={styles.modal}>
             <Text style={styles.emoji}>🦦</Text>
@@ -175,7 +181,10 @@ export function BlockedQuotaModal({
               </Pressable>
 
               <Pressable
-                onPress={onDismiss}
+                onPress={() => {
+                  trackEvent('blocked_quota_modal_dismissed', { type, action: 'come_back_tomorrow' });
+                  onDismiss();
+                }}
                 disabled={processing}
                 style={({ pressed }) => [
                   styles.tertiaryButton,

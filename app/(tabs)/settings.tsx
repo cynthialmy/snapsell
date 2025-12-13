@@ -196,7 +196,8 @@ export default function SettingsScreen() {
     );
   };
 
-  const handleUpgrade = () => {
+  const handleUpgrade = (context: 'creations' | 'saves' = 'creations') => {
+    trackEvent('upgrade_button_clicked', { source: 'settings', context });
     router.push('/(tabs)/upgrade');
   };
 
@@ -267,7 +268,7 @@ export default function SettingsScreen() {
                         </>
                       )}
                       {(quota.creations?.total_remaining ?? (quota.creations_remaining_today + quota.bonus_creations_remaining)) === 0 && (
-                        <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
+                        <Pressable onPress={() => handleUpgrade('creations')} style={styles.upgradeButton}>
                           <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
                         </Pressable>
                       )}
@@ -295,7 +296,7 @@ export default function SettingsScreen() {
                         </>
                       )}
                       {(quota.saves?.total_slots ?? quota.save_slots_remaining) === 0 && (
-                        <Pressable onPress={handleUpgrade} style={styles.upgradeButton}>
+                        <Pressable onPress={() => handleUpgrade('saves')} style={styles.upgradeButton}>
                           <Text style={styles.upgradeButtonText}>Upgrade to get more</Text>
                         </Pressable>
                       )}
@@ -313,7 +314,10 @@ export default function SettingsScreen() {
                 Free tier includes daily creation limits and 3-5 Save Slots
               </Text>
               <Pressable
-                onPress={() => router.push('/(auth)/sign-in')}
+                onPress={() => {
+                  trackEvent('sign_in_button_clicked', { source: 'settings' });
+                  router.push('/(auth)/sign-in');
+                }}
                 style={styles.signInButton}>
                 <Text style={styles.signInButtonText}>Sign In</Text>
               </Pressable>
@@ -338,7 +342,15 @@ export default function SettingsScreen() {
             <Text style={styles.preferenceLabel}>Currency</Text>
             <View style={styles.dropdownContainer}>
               <Pressable
-                onPress={() => setShowCurrencyDropdown(!showCurrencyDropdown)}
+                onPress={() => {
+                  const wasOpen = showCurrencyDropdown;
+                  setShowCurrencyDropdown(!showCurrencyDropdown);
+                  if (!wasOpen) {
+                    trackEvent('currency_dropdown_opened', { source: 'settings' });
+                  } else {
+                    trackEvent('currency_dropdown_closed', { source: 'settings' });
+                  }
+                }}
                 style={styles.currencyButton}>
                 <Text style={styles.currencyButtonText}>{currency}</Text>
                 <Text style={styles.currencyButtonArrow}>{showCurrencyDropdown ? '▲' : '▼'}</Text>

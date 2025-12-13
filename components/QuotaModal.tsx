@@ -47,7 +47,13 @@ export function QuotaModal({
       animationType="fade"
       onRequestClose={onDismiss}>
       <View style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={onDismiss} />
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => {
+            trackEvent('quota_modal_dismissed', { count, period, action: 'backdrop' });
+            onDismiss();
+          }}
+        />
         <SafeAreaView style={styles.modalContainer} edges={['bottom']}>
           <View style={styles.modal}>
             <Text style={styles.headline}>You're doing great!</Text>

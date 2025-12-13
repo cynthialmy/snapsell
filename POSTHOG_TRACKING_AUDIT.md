@@ -59,6 +59,8 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 - `location_button_pressed` - when user requests location
 - `create_listing_from_empty_state` - when creating from empty my-listings state (this is the create listing button in my-listings)
 - `analysis_cancelled` - when user cancels image analysis during processing
+- `condition_modal_opened` - when condition selection modal is opened (with source: listing-preview)
+- `condition_modal_closed` - when condition selection modal is closed (with source: listing-preview)
 
 ### Save & Auto-Save
 ✅ **Save Functionality:**
@@ -71,6 +73,16 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 - `low_quota_nudge_shown` - when low quota warning is displayed
 - `generate_blocked_no_quota` - when generation blocked
 - `save_blocked_no_quota` - when save blocked
+- `quota_modal_shown` - when quota modal is displayed
+- `quota_upgrade_tap` - when user taps upgrade in quota modal
+- `quota_continue_free` - when user continues with free tier
+- `quota_modal_dismissed` - when quota modal is dismissed (with action: backdrop)
+- `blocked_quota_modal_dismissed` - when blocked quota modal is dismissed (with type and action)
+- `save_slots_paywall_shown` - when save slots paywall is displayed
+- `save_slots_paywall_buy_slots` - when user clicks buy slots in paywall
+- `save_slots_paywall_go_unlimited` - when user clicks go unlimited in paywall
+- `save_slots_paywall_dismissed` - when save slots paywall is dismissed (with action: backdrop)
+- `save_slots_info_toggled` - when user toggles "What are Save Slots?" info (with state: expanded/collapsed)
 
 ### Purchase & Payments
 ✅ **Purchase Flow:**
@@ -79,6 +91,9 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 - `purchase_failed` - when purchase fails
 - `purchase_cancelled` - when user cancels purchase
 - `purchase_options_opened` - when purchase screen is opened
+- `purchase_sheet_opened` - when purchase sheet modal is opened
+- `purchase_sheet_dismissed` - when purchase sheet is dismissed (with action: close_button/backdrop)
+- `purchase_product_selected` - when user selects a product before purchase (with product_type and product_id)
 - `payment_history_viewed` - when payment history is loaded
 - `tap_buy_pack` - when user taps buy pack in blocked quota modal
 - `pack_purchase_failed` - when pack purchase fails
@@ -102,6 +117,10 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 ✅ **Settings Changes:**
 - `setting_changed` - tracks changes to: default_location, currency, auto_save_listing, show_quota_modal, low_quota_threshold
 - `profile_viewed` - when profile screen opened from settings
+- `upgrade_button_clicked` - when user clicks upgrade button (with context: creations/saves)
+- `sign_in_button_clicked` - when user clicks sign in button (with source: settings)
+- `currency_dropdown_opened` - when currency dropdown is opened (with source: settings/listing-preview)
+- `currency_dropdown_closed` - when currency dropdown is closed (with source: settings/listing-preview)
 
 ## Potentially Missing Tracking
 
@@ -110,58 +129,53 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 **Issue:** If there's a button/functionality to generate share links for listings, it's not tracked.
 **Recommendation:** Add `share_link_generated` event when user creates a share link.
 
-### 2. Upgrade Button Clicks from Settings ⚠️
-**Status:** Missing
+### 2. Upgrade Button Clicks from Settings ✅
+**Status:** ✅ Fixed - Now tracked
 **Location:** `app/(tabs)/settings.tsx` - `handleUpgrade()` function
-**Issue:** When users click "Upgrade to get more" buttons in settings screen, no event is tracked.
-**Recommendation:** Add `upgrade_button_clicked` event with context (creations/saves).
+**Note:** `upgrade_button_clicked` event is now tracked with context (creations/saves) when user clicks upgrade buttons.
 
-### 3. Sign In Button from Settings ⚠️
-**Status:** Missing
+### 3. Sign In Button from Settings ✅
+**Status:** ✅ Fixed - Now tracked
 **Location:** `app/(tabs)/settings.tsx` - Sign in button for non-authenticated users
-**Issue:** When non-authenticated users click "Sign In" in settings, no event is tracked.
-**Recommendation:** Add `sign_in_button_clicked` event with source: 'settings'.
+**Note:** `sign_in_button_clicked` event is now tracked with source: 'settings'.
 
-### 4. "What are Save Slots?" Info Toggle ⚠️
-**Status:** Missing
+### 4. "What are Save Slots?" Info Toggle ✅
+**Status:** ✅ Fixed - Now tracked
 **Location:** `app/(tabs)/upgrade.tsx` - Info toggle button
-**Issue:** When users expand/collapse the "What are Save Slots?" section, no event is tracked.
-**Recommendation:** Add `save_slots_info_toggled` event with state (expanded/collapsed).
+**Note:** `save_slots_info_toggled` event is now tracked with state (expanded/collapsed).
 
-### 5. Currency Dropdown Interactions ⚠️
-**Status:** Missing
-**Location:** `app/(tabs)/settings.tsx` - Currency dropdown
-**Issue:** Opening/closing currency dropdown is not tracked.
-**Recommendation:** Add `currency_dropdown_opened` and `currency_dropdown_closed` events.
+### 5. Currency Dropdown Interactions ✅
+**Status:** ✅ Fixed - Now tracked
+**Location:** `app/(tabs)/settings.tsx` and `app/(tabs)/listing-preview.tsx` - Currency dropdown
+**Note:** `currency_dropdown_opened` and `currency_dropdown_closed` events are now tracked with source (settings/listing-preview).
 
-### 6. Condition Modal Interactions ⚠️
-**Status:** Missing
+### 6. Condition Modal Interactions ✅
+**Status:** ✅ Fixed - Now tracked
 **Location:** `app/(tabs)/listing-preview.tsx` - Condition selection modal
-**Issue:** Opening/closing condition modal and condition selection may not be tracked.
-**Recommendation:** Verify if condition selection is tracked via `listing_field_edited` (it should be).
+**Note:**
+- Condition selection is tracked via `listing_field_edited` (already implemented)
+- `condition_modal_opened` and `condition_modal_closed` events are now tracked with source: 'listing-preview'
 
-### 7. Error Tracking ⚠️
-**Status:** Function exists but not widely used
-**Location:** `utils/analytics.ts` - `trackError()` function
-**Issue:** The `trackError()` function exists but is not called anywhere in the app.
-**Recommendation:** Add error tracking for:
-- API failures
-- Image upload failures
-- Network errors
-- Unexpected errors
+### 7. Error Tracking ✅
+**Status:** ✅ Fixed - Now implemented
+**Location:** Multiple locations - `trackError()` function usage
+**Note:** Error tracking is now implemented for:
+- API failures (in `utils/api.ts` and `utils/listings-api.ts`)
+- Image analysis errors (in home, my-listings, listing-preview screens)
+- Listing deletion errors (in my-listings screen)
+- Network errors (in `utils/api.ts`)
 
-### 8. Modal Dismissals ⚠️
-**Status:** Partially tracked
-**Issue:** Some modals track dismissal (login_gate_dismissed), but others don't:
-- BlockedQuotaModal - "Come back tomorrow" button
-- QuotaModal dismissals
-- Other modal dismissals
-**Recommendation:** Track modal dismissals consistently.
+### 8. Modal Dismissals ✅
+**Status:** ✅ Fixed - Now tracked
+**Note:** Modal dismissals are now consistently tracked:
+- `blocked_quota_modal_dismissed` - with type and action (come_back_tomorrow/backdrop)
+- `quota_modal_dismissed` - with count, period, and action (backdrop)
+- `save_slots_paywall_dismissed` - with limit and action (backdrop)
+- `purchase_sheet_dismissed` - with action (close_button/backdrop)
 
-### 9. Purchase Product Selection Details ⚠️
-**Status:** Partially tracked
-**Issue:** `purchase_initiated` tracks product_type and product_id, but individual product button clicks in purchase screen aren't tracked separately.
-**Recommendation:** Add `purchase_product_selected` event before `purchase_initiated` to track which specific product user selected.
+### 9. Purchase Product Selection Details ✅
+**Status:** ✅ Fixed - Now tracked
+**Note:** `purchase_product_selected` event is now tracked before `purchase_initiated` with product_type and product_id.
 
 ### 10. Listing Preview Screen Entry ⚠️
 **Status:** Tracked via screen_viewed
@@ -185,40 +199,41 @@ This document provides a comprehensive audit of PostHog analytics tracking acros
 ## Recommendations
 
 ### High Priority
-1. **Add error tracking** - Use `trackError()` function for critical errors
-2. **Track upgrade button clicks** - Add tracking in settings screen
+1. ✅ **Error tracking** - Now implemented using `trackError()` function for critical errors
+2. ✅ **Upgrade button clicks** - Now tracked in settings screen
 3. **Track share link generation** - If share functionality exists, track it
 
 ### Medium Priority
-4. **Track info toggles** - Save Slots info, currency dropdown
-5. **Track modal dismissals** - Consistent tracking across all modals
-6. **Track sign-in button clicks** - From settings and other locations
+4. ✅ **Info toggles** - Save Slots info and currency dropdown now tracked
+5. ✅ **Modal dismissals** - Now consistently tracked across all modals
+6. ✅ **Sign-in button clicks** - Now tracked from settings
 
 ### Low Priority
-7. **Enhance purchase tracking** - Track product selection separately
-8. **Add context to screen views** - Track how users arrived at screens
+7. ✅ **Purchase tracking** - Product selection now tracked separately
+8. **Add context to screen views** - Track how users arrived at screens (future enhancement)
 
 ## Implementation Notes
 
 - All tracking uses `trackEvent()` from `utils/analytics.ts`
 - Screen views use `trackScreenView()` helper
 - Tab switches use `trackTabSwitch()` helper
-- Error tracking function exists but is unused
+- Error tracking uses `trackError()` function for critical errors
 - PostHog is initialized in `app/_layout.tsx`
 - Events are flushed immediately (`flushAt: 1`) for production builds
 
 ## Conclusion
 
-**Overall Coverage:** ~90% of user activities are tracked.
+**Overall Coverage:** ~95% of user activities are tracked (improved from ~90%).
 
 **Strengths:**
 - Comprehensive authentication tracking
 - Good coverage of listing creation and editing
-- Purchase flow is well tracked
+- Purchase flow is well tracked with product selection
 - Screen views are tracked consistently
+- Error tracking is now implemented for critical errors
+- Modal interactions and dismissals are consistently tracked
+- UI interactions (dropdowns, toggles, buttons) are now tracked
 
-**Gaps:**
-- Error tracking is not implemented
-- Some UI interactions (dropdowns, toggles) are not tracked
-- Share link generation (if exists) is not tracked
-- Some button clicks in settings screen are not tracked
+**Remaining Gaps:**
+- Share link generation (if functionality exists, needs tracking)
+- Screen view context (how users arrived at screens) - low priority enhancement

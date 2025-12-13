@@ -45,6 +45,7 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
   }, [visible]);
 
   const handleDismiss = () => {
+    trackEvent('purchase_sheet_dismissed', { action: 'close_button' });
     onDismiss();
   };
 
@@ -69,6 +70,8 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
 
     setProcessing(true);
     try {
+      // Track product selection
+      trackEvent('purchase_product_selected', { product_type: 'pack', product_id: sku });
       // Track purchase initiation
       trackEvent('tap_buy_pack', { sku });
 
@@ -127,6 +130,8 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
 
     setProcessing(true);
     try {
+      // Track product selection
+      trackEvent('purchase_product_selected', { product_type: 'subscription', product_id: plan });
       // Track subscription initiation
       trackEvent('purchase_initiated', {
         product_type: 'subscription',
@@ -176,7 +181,13 @@ export function PurchaseSheet({ visible, onDismiss }: PurchaseSheetProps) {
       onRequestClose={handleDismiss}
       statusBarTranslucent>
       <View style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={handleDismiss} />
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => {
+            trackEvent('purchase_sheet_dismissed', { action: 'backdrop' });
+            handleDismiss();
+          }}
+        />
         <SafeAreaView style={styles.safeAreaContainer} edges={['bottom']}>
           <View style={[styles.modal, { maxHeight: maxModalHeight }]}>
             {/* Header */}

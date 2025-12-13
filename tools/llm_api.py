@@ -82,7 +82,7 @@ def create_llm_client(provider="openai"):
         azure_endpoint = os.getenv('AZURE_OPENAI_ENDPOINT', 'https://support-8844-resource.cognitiveservices.azure.com')
         # Ensure endpoint doesn't have trailing slash
         azure_endpoint = azure_endpoint.rstrip('/')
-        api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2024-08-01-preview')
+        api_version = os.getenv('AZURE_OPENAI_API_VERSION', '2025-08-07')
         return AzureOpenAI(
             api_key=api_key,
             api_version=api_version,
@@ -148,7 +148,7 @@ def query_llm(prompt: str, client=None, model=None, provider="openai", image_pat
             if provider == "openai":
                 model = os.getenv('OPENAI_MODEL_DEPLOYMENT', 'gpt-4o')
             elif provider == "azure":
-                model = os.getenv('AZURE_OPENAI_MODEL_DEPLOYMENT', 'gpt-4o-ms')  # Get from env with fallback
+                model = os.getenv('AZURE_OPENAI_MODEL_DEPLOYMENT', 'gpt-5-mini')  # Get from env with fallback
             elif provider == "deepseek":
                 model = "deepseek-chat"
             elif provider == "siliconflow":
@@ -267,7 +267,7 @@ def main():
         elif args.provider == 'gemini':
             args.model = "gemini-2.0-flash-exp"
         elif args.provider == 'azure':
-            args.model = os.getenv('AZURE_OPENAI_MODEL_DEPLOYMENT', 'gpt-4o-ms')  # Get from env with fallback
+            args.model = os.getenv('AZURE_OPENAI_MODEL_DEPLOYMENT', 'gpt-5-mini')  # Get from env with fallback
 
     client = create_llm_client(args.provider)
     response = query_llm(args.prompt, client, model=args.model, provider=args.provider, image_path=args.image)

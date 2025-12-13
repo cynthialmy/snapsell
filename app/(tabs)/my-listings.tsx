@@ -21,7 +21,7 @@ import { BlockedQuotaModal } from '@/components/BlockedQuotaModal';
 import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackError, trackEvent, trackScreenView } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
@@ -265,6 +265,8 @@ export default function MyListingsScreen() {
         setIsAnalyzing(false);
         setShowBlockedModal(true);
       } else {
+        const err = error instanceof Error ? error : new Error(String(error));
+        trackError('image_analysis_error', err, { source: 'my-listings' });
         setErrorMessage(transformErrorMessage(rawMessage));
       }
     } finally {
@@ -464,6 +466,8 @@ export default function MyListingsScreen() {
           onPress: async () => {
             const { error } = await deleteListingApi(listing.id);
             if (error) {
+              const err = error instanceof Error ? error : new Error('Failed to delete listing');
+              trackError('listing_deletion_error', err, { listing_id: listing.id });
               Alert.alert('Error', 'Failed to delete listing. Please try again.');
             } else {
               trackEvent('listing_deleted', { listing_id: listing.id });

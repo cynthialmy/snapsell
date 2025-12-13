@@ -16,7 +16,7 @@ services:
       - key: AZURE_OPENAI_MODEL_DEPLOYMENT
         sync: false
       - key: AZURE_OPENAI_API_VERSION
-        value: 2024-08-01-preview
+        value: 2025-08-07
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: SNAPSELL_ALLOWED_ORIGINS

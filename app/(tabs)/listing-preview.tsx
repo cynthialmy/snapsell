@@ -27,7 +27,7 @@ import { QuotaModal } from '@/components/QuotaModal';
 import { SaveSlotsPaywall } from '@/components/SaveSlotsPaywall';
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackError, trackEvent, trackScreenView } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing, updateListing } from '@/utils/listings';
@@ -1378,6 +1378,8 @@ export default function ListingPreviewScreen() {
         setIsAnalyzing(false);
         setShowBlockedModal(true);
       } else {
+        const err = error instanceof Error ? error : new Error(String(error));
+        trackError('image_analysis_error', err, { source: 'listing-preview' });
         setErrorMessage(transformErrorMessage(rawMessage));
       }
     } finally {
@@ -1625,8 +1627,14 @@ export default function ListingPreviewScreen() {
                   <View style={[styles.currencySelector, styles.dropdownContainer]}>
                     <Pressable
                       onPress={() => {
+                        const wasOpen = showCurrencyDropdown;
                         setShowCurrencyDropdown(!showCurrencyDropdown);
                         setShowConditionModal(false);
+                        if (!wasOpen) {
+                          trackEvent('currency_dropdown_opened', { source: 'listing-preview' });
+                        } else {
+                          trackEvent('currency_dropdown_closed', { source: 'listing-preview' });
+                        }
                       }}
                       style={styles.currencyButton}>
                       <Text style={styles.currencyButtonText}>{currency}</Text>
@@ -1686,8 +1694,14 @@ export default function ListingPreviewScreen() {
                 <View style={styles.dropdownContainer}>
                   <Pressable
                     onPress={() => {
+                      const wasOpen = showConditionModal;
                       setShowConditionModal(!showConditionModal);
                       setShowCurrencyDropdown(false);
+                      if (!wasOpen) {
+                        trackEvent('condition_modal_opened', { source: 'listing-preview' });
+                      } else {
+                        trackEvent('condition_modal_closed', { source: 'listing-preview' });
+                      }
                     }}
                     style={styles.conditionButton}>
                     <Text style={styles.conditionButtonText}>{condition}</Text>

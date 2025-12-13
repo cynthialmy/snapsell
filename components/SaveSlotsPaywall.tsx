@@ -43,7 +43,13 @@ export function SaveSlotsPaywall({
       animationType="fade"
       onRequestClose={onDismiss}>
       <View style={styles.overlay}>
-        <Pressable style={styles.backdrop} onPress={onDismiss} />
+        <Pressable
+          style={styles.backdrop}
+          onPress={() => {
+            trackEvent('save_slots_paywall_dismissed', { limit, action: 'backdrop' });
+            onDismiss?.();
+          }}
+        />
         <SafeAreaView style={styles.modalContainer} edges={['bottom']}>
           <View style={styles.modal}>
             <Text style={styles.emoji}>🦦</Text>
@@ -159,7 +165,3 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 });
-
-
-
-

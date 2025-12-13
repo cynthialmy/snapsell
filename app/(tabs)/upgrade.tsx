@@ -1,11 +1,11 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useState } from 'react';
 import {
-    Pressable,
-    ScrollView,
-    StyleSheet,
-    Text,
-    View,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -194,7 +194,11 @@ export default function UpgradeScreen() {
 
             {/* Collapsible "What are Save Slots?" section */}
             <Pressable
-              onPress={() => setShowSaveSlotsInfo(!showSaveSlotsInfo)}
+              onPress={() => {
+                const newState = !showSaveSlotsInfo;
+                setShowSaveSlotsInfo(newState);
+                trackEvent('save_slots_info_toggled', { state: newState ? 'expanded' : 'collapsed' });
+              }}
               style={styles.infoToggle}>
               <Text style={styles.infoToggleText}>
                 What are Save Slots?

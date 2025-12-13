@@ -41,11 +41,14 @@ function getEdgeFunctionUrl(): string | null {
   const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL;
 
   if (functionsUrl) {
-    return functionsUrl;
+    // Remove trailing slashes to avoid double slashes when appending paths
+    return functionsUrl.replace(/\/+$/, '');
   }
 
   if (supabaseUrl) {
-    return `${supabaseUrl}/functions/v1`;
+    // Remove trailing slashes from supabaseUrl before appending /functions/v1
+    const cleanSupabaseUrl = supabaseUrl.replace(/\/+$/, '');
+    return `${cleanSupabaseUrl}/functions/v1`;
   }
 
   return null;
@@ -108,6 +111,16 @@ console.log('[API Config] EXPO_PUBLIC_SUPABASE_FUNCTIONS_URL:', process.env.EXPO
 
 // Helper function to check if an error is retryable
 function isRetryableError(error: unknown, response?: Response): boolean {
+  // Rate limit errors (429) are not retryable - user needs to wait
+  if (response && response.status === 429) {
+    return false;
+  }
+
+  // Quota exceeded errors (402) are not retryable
+  if (response && response.status === 402) {
+    return false;
+  }
+
   // Network errors are retryable
   if (error instanceof TypeError) {
     return true;
@@ -168,14 +181,19 @@ function getRandomTimeoutMessage(): string {
   return TIMEOUT_MESSAGES[Math.floor(Math.random() * TIMEOUT_MESSAGES.length)];
 }
 
-const REQUEST_TIMEOUT_MS = 20_000;
+// Edge Functions with LLM calls can take 30-60+ seconds, especially with cold starts
+// Use longer timeout for Edge Functions, shorter for legacy backend
+// Edge Functions with LLM calls can take 30-60+ seconds, especially with cold starts
+// Legacy backend typically responds faster
+const DEFAULT_TIMEOUT_MS = 20_000;
+const EDGE_FUNCTION_TIMEOUT_MS = 60_000;
 const TIMEOUT_RETRY_DELAY_MS = 2_000;
 
 async function fetchWithTimeout(
   input: RequestInfo | URL,
   init: RequestInit & { timeoutMs?: number } = {},
 ): Promise<Response> {
-  const { timeoutMs = REQUEST_TIMEOUT_MS, signal, ...rest } = init;
+  const { timeoutMs = DEFAULT_TIMEOUT_MS, signal, ...rest } = init;
   const controller = new AbortController();
 
   const timeoutId = setTimeout(() => {
@@ -234,14 +252,17 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
   let lastError: Error | null = null;
   let lastResponse: Response | undefined = undefined;
 
+  // Determine endpoint URL once (used in error tracking)
+  const baseUrl = USE_EDGE_FUNCTION ? EDGE_FUNCTION_URL : API_URL;
+  const cleanBaseUrl = baseUrl?.replace(/\/+$/, '') || '';
+  const endpointUrl = USE_EDGE_FUNCTION
+    ? `${cleanBaseUrl}/analyze-image`
+    : `${cleanBaseUrl}/api/analyze-image`;
+
   onStatusChange?.(null);
 
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      // Determine endpoint URL
-      const endpointUrl = USE_EDGE_FUNCTION
-        ? `${EDGE_FUNCTION_URL}/analyze-image`
-        : `${API_URL}/api/analyze-image`;
 
       console.log('[API] Uploading image to:', endpointUrl);
       console.log('[API] Platform:', Platform.OS);
@@ -314,14 +335,17 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
         // FormData will be handled automatically by fetch on web
       }
 
+      // Use longer timeout for Edge Functions (LLM calls can take 30-60+ seconds)
+      const timeoutMs = USE_EDGE_FUNCTION ? EDGE_FUNCTION_TIMEOUT_MS : DEFAULT_TIMEOUT_MS;
       console.log('[API] Making fetch request...');
+      console.log(`[API] Timeout: ${timeoutMs}ms (${USE_EDGE_FUNCTION ? 'Edge Function' : 'Legacy backend'})`);
       // Pass user's abort signal to fetchWithTimeout
       // fetchWithTimeout will combine it with its own timeout signal
       const response = await fetchWithTimeout(endpointUrl, {
         method: 'POST',
         body: formData,
         headers,
-        timeoutMs: REQUEST_TIMEOUT_MS,
+        timeoutMs,
         signal: signal,
       });
 
@@ -349,19 +373,35 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
           quotaError.creations_remaining_today = errorData.creations_remaining_today ?? 0;
           quotaError.creations_daily_limit = errorData.creations_daily_limit ?? 0;
           quotaError.bonus_creations_remaining = errorData.bonus_creations_remaining ?? 0;
+          quotaError.resets_at = errorData.resets_at;
           lastError = quotaError;
+        }
+        // Handle rate limit (429) - attach quota info to error
+        else if (response.status === 429) {
+          const rateLimitError: any = new Error(errorMessage);
+          rateLimitError.code = errorData.code || 'RATE_LIMIT_EXCEEDED';
+          rateLimitError.remaining = errorData.remaining ?? 0;
+          rateLimitError.limit = errorData.limit ?? 10;
+          rateLimitError.retry_after = errorData.retry_after;
+          rateLimitError.resets_at = errorData.resets_at;
+          // Also include quota fields for consistency
+          rateLimitError.creations_remaining_today = errorData.creations_remaining_today ?? errorData.remaining ?? 0;
+          rateLimitError.creations_daily_limit = errorData.creations_daily_limit ?? errorData.limit ?? 10;
+          lastError = rateLimitError;
         } else {
           const error = new Error(errorMessage);
           lastError = error;
         }
 
         // Track API error
-        trackError('api_error', lastError, {
-          endpoint: endpointUrl,
-          status_code: response.status,
-          attempt,
-          max_attempts: maxAttempts,
-        });
+        if (lastError) {
+          trackError('api_error', lastError, {
+            endpoint: endpointUrl,
+            status_code: response.status,
+            attempt,
+            max_attempts: maxAttempts,
+          });
+        }
 
         // Check if this error is retryable
         if (isRetryableError(lastError, response) && attempt < maxAttempts) {
@@ -378,15 +418,16 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
       console.log('[API] Full response data keys:', Object.keys(responseData));
       console.log('[API] Response quota object:', JSON.stringify(responseData.quota, null, 2));
 
-      // Extract quota if present (for authenticated users)
+      // Extract quota if present (for both authenticated and unauthenticated users)
       const quota = responseData.quota || null;
       if (quota) {
         console.log('[API] Extracted quota details:', {
           creations_remaining_today: quota.creations_remaining_today,
           creations_daily_limit: quota.creations_daily_limit,
-          bonus_creations_remaining: quota.bonus_creations_remaining,
-          save_slots_remaining: quota.save_slots_remaining,
-          is_pro: quota.is_pro,
+          bonus_creations_remaining: quota.bonus_creations_remaining ?? 0,
+          save_slots_remaining: quota.save_slots_remaining ?? 0,
+          is_pro: quota.is_pro ?? false,
+          resets_at: quota.resets_at,
         });
       }
 
@@ -467,11 +508,13 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
         );
       }
       // Track other errors
-      trackError('api_error', lastError, {
-        endpoint: endpointUrl,
-        attempt,
-        max_attempts: maxAttempts,
-      });
+      if (lastError) {
+        trackError('api_error', lastError, {
+          endpoint: endpointUrl,
+          attempt,
+          max_attempts: maxAttempts,
+        });
+      }
       throw lastError;
     }
   }

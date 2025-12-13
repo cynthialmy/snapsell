@@ -4,14 +4,14 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-    Alert,
-    Platform,
-    Pressable,
-    ScrollView,
-    StatusBar,
-    StyleSheet,
-    Text,
-    View,
+  Alert,
+  Platform,
+  Pressable,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -20,11 +20,11 @@ import { LowSlotsWarning } from '@/components/LowSlotsWarning';
 import { QuotaCounterPill } from '@/components/QuotaCounterPill';
 import { SnappyLoading } from '@/components/snappy-loading';
 import { useAuth } from '@/contexts/AuthContext';
-import { trackEvent, trackScreenView } from '@/utils/analytics';
+import { trackError, trackEvent, trackScreenView } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
-import { checkQuota, type UserQuota } from '@/utils/listings-api';
+import { checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
 
 // Transform technical error messages to cute Snappy messages
@@ -70,6 +70,7 @@ export default function HomeScreen() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [quota, setQuota] = useState<UserQuota | null>(null);
+  const [anonymousQuota, setAnonymousQuota] = useState<AnonymousQuota | null>(null);
   const [quotaLoading, setQuotaLoading] = useState(false);
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
@@ -190,7 +191,7 @@ export default function HomeScreen() {
       // This prevents "Untitled Listing" entries from being created
       navigateToPreview({ listing, imageUri: asset.uri, storagePath });
 
-      // Use quota from response if available (for authenticated users), otherwise refresh quota
+      // Use quota from response if available (for both authenticated and unauthenticated users)
       if (user) {
         const updatedQuota = returnedQuota || await loadQuota();
         if (updatedQuota) {
@@ -214,6 +215,16 @@ export default function HomeScreen() {
         } else {
           console.warn('[Image Analysis] No quota returned from analysis or loadQuota');
         }
+      } else if (returnedQuota) {
+        // For unauthenticated users, extract anonymous quota from response
+        const anonymousQuotaData: AnonymousQuota = {
+          creations_remaining_today: returnedQuota.creations_remaining_today,
+          creations_daily_limit: returnedQuota.creations_daily_limit,
+          creations_used_today: returnedQuota.creations_daily_limit - returnedQuota.creations_remaining_today,
+          resets_at: returnedQuota.resets_at,
+        };
+        console.log('[Image Analysis] Updating anonymous quota after analysis:', anonymousQuotaData);
+        setAnonymousQuota(anonymousQuotaData);
       }
     } catch (error) {
       // Check if this is a cancellation (not an error)
@@ -225,15 +236,44 @@ export default function HomeScreen() {
 
       const rawMessage = error instanceof Error ? error.message : 'Something went wrong. Please try again.';
       const errorCode = (error as any)?.code;
+      const errorData = error as any;
 
-      // Check if it's a quota exceeded error from the API
+      // Check if it's a quota exceeded error from the API (402)
       if (errorCode === 'QUOTA_EXCEEDED' || rawMessage.includes('QUOTA_EXCEEDED')) {
         trackEvent('generate_blocked_no_quota', {
           error_source: 'api',
         });
         setIsAnalyzing(false);
         setShowBlockedModal(true);
+      }
+      // Check if it's a rate limit error (429) - extract quota info
+      else if (errorCode === 'RATE_LIMIT_EXCEEDED' || errorData?.remaining !== undefined) {
+        const remaining = errorData.remaining ?? 0;
+        const limit = errorData.limit ?? 10;
+        const resetsAt = errorData.resets_at;
+
+        // Update anonymous quota if available
+        if (!user && remaining !== undefined && limit !== undefined) {
+          const anonymousQuotaData: AnonymousQuota = {
+            creations_remaining_today: remaining,
+            creations_daily_limit: limit,
+            creations_used_today: limit - remaining,
+            resets_at: resetsAt || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          };
+          setAnonymousQuota(anonymousQuotaData);
+        }
+
+        // Show user-friendly rate limit message
+        const rateLimitMessage = `Daily limit reached (${limit} creations). ${remaining > 0 ? `${remaining} remaining. ` : ''}${resetsAt ? `Resets at ${new Date(resetsAt).toLocaleTimeString()}` : 'Try again later.'}`;
+        setErrorMessage(rateLimitMessage);
+        trackEvent('rate_limit_hit', {
+          remaining,
+          limit,
+          resets_at: resetsAt,
+        });
       } else {
+        const err = error instanceof Error ? error : new Error(String(error));
+        trackError('image_analysis_error', err, { source: 'home' });
         setErrorMessage(transformErrorMessage(rawMessage));
       }
     } finally {
@@ -459,6 +499,7 @@ export default function HomeScreen() {
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.header}>
           <Text style={styles.eyebrow}>SNAPSELL</Text>
+          {/* Show quota for authenticated users */}
           {user && quota && !quota.is_pro && (
             <View style={styles.quotaHeader}>
               <QuotaCounterPill
@@ -474,6 +515,19 @@ export default function HomeScreen() {
               />
               <Text style={styles.quotaBreakdown}>
                 Free left today: {quota.creations?.free_remaining_today ?? quota.creations_remaining_today} + Purchased: {quota.creations?.purchased_remaining ?? quota.bonus_creations_remaining}
+              </Text>
+            </View>
+          )}
+          {/* Show quota for unauthenticated users */}
+          {!user && anonymousQuota && (
+            <View style={styles.quotaHeader}>
+              <QuotaCounterPill
+                remaining={anonymousQuota.creations_remaining_today}
+                limit={anonymousQuota.creations_daily_limit}
+                label="Creations left today"
+              />
+              <Text style={styles.quotaBreakdown}>
+                {anonymousQuota.creations_remaining_today} of {anonymousQuota.creations_daily_limit} free creations remaining
               </Text>
             </View>
           )}
