@@ -2,7 +2,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Platform,
@@ -24,14 +24,53 @@ import { trackError, trackEvent, trackScreenView } from '@/utils/analytics';
 import { analyzeItemPhoto, type ListingData } from '@/utils/api';
 import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
-import { checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
+import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
+
+// Check if an error message looks technical (contains URLs, version numbers, technical jargon, etc.)
+function isTechnicalError(message: string): boolean {
+  const lowerMessage = message.toLowerCase();
+
+  // Check for URLs
+  if (/https?:\/\//.test(message) || /\.(com|net|org|io|azure|ai)\//.test(lowerMessage)) {
+    return true;
+  }
+
+  // Check for version numbers (dates like 2025-08-07, or version patterns)
+  if (/\d{4}-\d{2}-\d{2}/.test(message) || /\bv\d+\.\d+/.test(lowerMessage)) {
+    return true;
+  }
+
+  // Check for technical jargon (deployment, endpoint, api version, resource, etc.)
+  const technicalTerms = [
+    'deployment', 'endpoint', 'api version', 'resource', 'cognitiveservices',
+    'verify that', 'please verify', 'exists in your', 'is correct', 'is supported'
+  ];
+  const technicalTermCount = technicalTerms.filter(term => lowerMessage.includes(term)).length;
+
+  // If message contains multiple technical terms or is very long, it's likely technical
+  if (technicalTermCount >= 2 || (technicalTermCount >= 1 && message.length > 100)) {
+    return true;
+  }
+
+  return false;
+}
 
 // Transform technical error messages to cute Snappy messages
 function transformErrorMessage(message: string): string {
   const lowerMessage = message.toLowerCase();
 
-  // Check for technical terms and replace with cute messages
+  // If it's already a cute message (contains "Snappy"), return as-is
+  if (lowerMessage.includes('snappy')) {
+    return message;
+  }
+
+  // Check if this looks like a technical error - if so, show generic message
+  if (isTechnicalError(message)) {
+    return "Snappy is having trouble processing your photo. Please try again.";
+  }
+
+  // Check for specific user-friendly error patterns and replace with cute messages
   if (lowerMessage.includes('timed out') || lowerMessage.includes('timeout')) {
     const cuteMessages = [
       "Snappy couldn't wake up because he partied too hard last night...",
@@ -55,11 +94,6 @@ function transformErrorMessage(message: string): string {
     return "Snappy can't reach the server right now. Let's try again in a moment...";
   }
 
-  // If it's already a cute message (contains "Snappy"), return as-is
-  if (lowerMessage.includes('snappy')) {
-    return message;
-  }
-
   // For other errors, return as-is (they might already be user-friendly)
   return message;
 }
@@ -75,6 +109,8 @@ export default function HomeScreen() {
   const [showBlockedModal, setShowBlockedModal] = useState(false);
   const [showLowQuotaNudge, setShowLowQuotaNudge] = useState(false);
   const [abortController, setAbortController] = useState<AbortController | null>(null);
+  const previousQuotaRef = useRef<UserQuota | AnonymousQuota | null>(null);
+  const quotaLoadingRef = useRef(false);
 
   const ctaLabel = useMemo(
     () => (isAnalyzing ? 'Creating listing…' : 'Create Listing'),
@@ -192,17 +228,44 @@ export default function HomeScreen() {
       navigateToPreview({ listing, imageUri: asset.uri, storagePath });
 
       // Use quota from response if available (for both authenticated and unauthenticated users)
+      // Backend response structure:
+      // - Authenticated: { creations_remaining_today, creations_daily_limit, bonus_creations_remaining,
+      //                    save_slots_remaining, is_pro } (NO resets_at)
+      // - Unauthenticated: Same as authenticated PLUS resets_at
       if (user) {
         const updatedQuota = returnedQuota || await loadQuota();
         if (updatedQuota) {
+          // Check if this is the first listing (quota went from 10 to 9)
+          // Only show if user is not pro and had 10 remaining before
+          const prevQuota = previousQuotaRef.current as UserQuota | null;
+          const isFirstListing = !updatedQuota.is_pro &&
+            prevQuota &&
+            prevQuota.creations_remaining_today === 10 &&
+            updatedQuota.creations_remaining_today === 9;
+
           // Update quota state immediately
           console.log('[Image Analysis] Updating quota after analysis:', {
             creations_remaining: updatedQuota.creations_remaining_today,
             save_slots_remaining: updatedQuota.save_slots_remaining,
             is_pro: updatedQuota.is_pro,
             fromResponse: !!returnedQuota,
+            isFirstListing,
+            previousRemaining: prevQuota?.creations_remaining_today,
           });
           setQuota(updatedQuota);
+          previousQuotaRef.current = updatedQuota;
+
+          // Show first listing celebration message
+          if (isFirstListing) {
+            Alert.alert(
+              '🎉 First Listing Created!',
+              `Great job! You've created your first listing. You have 9 creations remaining for today. Every day you get 10 free creations.`,
+              [{ text: 'Got it!', style: 'default' }]
+            );
+            trackEvent('first_listing_created', {
+              creations_remaining: updatedQuota.creations_remaining_today,
+            });
+          }
 
           // Show low quota nudge if creations <= 2
           if (!updatedQuota.is_pro && updatedQuota.creations_remaining_today <= 2) {
@@ -217,14 +280,57 @@ export default function HomeScreen() {
         }
       } else if (returnedQuota) {
         // For unauthenticated users, extract anonymous quota from response
+        // Backend response structure for unauthenticated users:
+        // { creations_remaining_today, creations_daily_limit, bonus_creations_remaining (always 0),
+        //   save_slots_remaining (always 0), is_pro (always false), resets_at }
+        // Verify that returnedQuota has the required fields
+        if (typeof returnedQuota.creations_remaining_today !== 'number' ||
+            typeof returnedQuota.creations_daily_limit !== 'number') {
+          console.warn('[Image Analysis] Invalid quota structure from backend:', {
+            has_creations_remaining: 'creations_remaining_today' in returnedQuota,
+            has_creations_daily_limit: 'creations_daily_limit' in returnedQuota,
+            quota_keys: Object.keys(returnedQuota),
+            quota: returnedQuota,
+          });
+          // Try to load quota separately if response structure is invalid
+          await loadAnonymousQuota();
+          return;
+        }
+
+        // Extract anonymous quota - resets_at should be present for unauthenticated users
+        // but we provide a fallback just in case
         const anonymousQuotaData: AnonymousQuota = {
           creations_remaining_today: returnedQuota.creations_remaining_today,
           creations_daily_limit: returnedQuota.creations_daily_limit,
           creations_used_today: returnedQuota.creations_daily_limit - returnedQuota.creations_remaining_today,
-          resets_at: returnedQuota.resets_at,
+          resets_at: returnedQuota.resets_at || new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
         };
-        console.log('[Image Analysis] Updating anonymous quota after analysis:', anonymousQuotaData);
+
+        // Check if this is the first listing (quota went from 10 to 9)
+        const prevQuota = previousQuotaRef.current as AnonymousQuota | null;
+        const isFirstListing = prevQuota &&
+          prevQuota.creations_remaining_today === 10 &&
+          anonymousQuotaData.creations_remaining_today === 9;
+
+        console.log('[Image Analysis] Updating anonymous quota after analysis:', {
+          ...anonymousQuotaData,
+          isFirstListing,
+          previousRemaining: prevQuota?.creations_remaining_today,
+        });
         setAnonymousQuota(anonymousQuotaData);
+        previousQuotaRef.current = anonymousQuotaData;
+
+        // Show first listing celebration message
+        if (isFirstListing) {
+          Alert.alert(
+            '🎉 First Listing Created!',
+            `Great job! You've created your first listing. You have 9 creations remaining for today. Every day you get 10 free creations.`,
+            [{ text: 'Got it!', style: 'default' }]
+          );
+          trackEvent('first_listing_created', {
+            creations_remaining: anonymousQuotaData.creations_remaining_today,
+          });
+        }
       }
     } catch (error) {
       // Check if this is a cancellation (not an error)
@@ -449,13 +555,19 @@ export default function HomeScreen() {
     });
   };
 
-  // Load quota
+  // Load quota for authenticated users
   const loadQuota = useCallback(async () => {
     if (!user) {
       setQuota(null);
       return null;
     }
 
+    // Prevent concurrent quota checks
+    if (quotaLoadingRef.current) {
+      return null;
+    }
+
+    quotaLoadingRef.current = true;
     setQuotaLoading(true);
     try {
       const { quota: userQuota, error } = await checkQuota();
@@ -466,6 +578,11 @@ export default function HomeScreen() {
         return null;
       } else if (userQuota) {
         setQuota(userQuota);
+        // Store previous quota for first listing detection (only if not already set or same user)
+        const prevUserQuota = previousQuotaRef.current as UserQuota | null;
+        if (!previousQuotaRef.current || (prevUserQuota?.user_id === userQuota.user_id)) {
+          previousQuotaRef.current = userQuota;
+        }
         // Show low quota nudge if creations <= 2
         if (!userQuota.is_pro && userQuota.creations_remaining_today <= 2) {
           trackEvent('low_quota_nudge_shown', {
@@ -482,6 +599,44 @@ export default function HomeScreen() {
       setQuota(null);
       return null;
     } finally {
+      quotaLoadingRef.current = false;
+      setQuotaLoading(false);
+    }
+  }, [user]);
+
+  // Load anonymous quota for unauthenticated users
+  const loadAnonymousQuota = useCallback(async () => {
+    if (user) {
+      setAnonymousQuota(null);
+      return null;
+    }
+
+    // Prevent concurrent quota checks
+    if (quotaLoadingRef.current) {
+      return null;
+    }
+
+    quotaLoadingRef.current = true;
+    setQuotaLoading(true);
+    try {
+      const { quota: anonymousQuotaData, error } = await checkAnonymousQuota();
+      if (error) {
+        // Silently handle backend not configured or unavailable
+        setAnonymousQuota(null);
+        return null;
+      } else if (anonymousQuotaData) {
+        setAnonymousQuota(anonymousQuotaData);
+        // Store previous quota for first listing detection
+        previousQuotaRef.current = anonymousQuotaData;
+        return anonymousQuotaData;
+      }
+      return null;
+    } catch (error) {
+      // Silently handle errors - backend might not be set up yet
+      setAnonymousQuota(null);
+      return null;
+    } finally {
+      quotaLoadingRef.current = false;
       setQuotaLoading(false);
     }
   }, [user]);
@@ -489,8 +644,12 @@ export default function HomeScreen() {
   useFocusEffect(
     useCallback(() => {
       trackScreenView('home', { is_authenticated: !!user });
-      loadQuota();
-    }, [loadQuota, user]),
+      if (user) {
+        loadQuota();
+      } else {
+        loadAnonymousQuota();
+      }
+    }, [loadQuota, loadAnonymousQuota, user]),
   );
 
   return (

@@ -428,7 +428,22 @@ export async function analyzeItemPhoto(options: AnalyzeOptions): Promise<Analyze
           save_slots_remaining: quota.save_slots_remaining ?? 0,
           is_pro: quota.is_pro ?? false,
           resets_at: quota.resets_at,
+          // Verify required fields exist
+          has_required_fields: typeof quota.creations_remaining_today === 'number' &&
+            typeof quota.creations_daily_limit === 'number',
+          all_quota_keys: Object.keys(quota),
         });
+
+        // Warn if required fields are missing
+        if (typeof quota.creations_remaining_today !== 'number' ||
+          typeof quota.creations_daily_limit !== 'number') {
+          console.warn('[API] Quota object missing required fields!', {
+            received_keys: Object.keys(quota),
+            quota_object: quota,
+          });
+        }
+      } else {
+        console.log('[API] No quota in response');
       }
 
       const listing: ListingData = {

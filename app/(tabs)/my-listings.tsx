@@ -59,10 +59,50 @@ export default function MyListingsScreen() {
     [isAnalyzing],
   );
 
+  // Check if an error message looks technical (contains URLs, version numbers, technical jargon, etc.)
+  const isTechnicalError = (message: string): boolean => {
+    const lowerMessage = message.toLowerCase();
+
+    // Check for URLs
+    if (/https?:\/\//.test(message) || /\.(com|net|org|io|azure|ai)\//.test(lowerMessage)) {
+      return true;
+    }
+
+    // Check for version numbers (dates like 2025-08-07, or version patterns)
+    if (/\d{4}-\d{2}-\d{2}/.test(message) || /\bv\d+\.\d+/.test(lowerMessage)) {
+      return true;
+    }
+
+    // Check for technical jargon (deployment, endpoint, api version, resource, etc.)
+    const technicalTerms = [
+      'deployment', 'endpoint', 'api version', 'resource', 'cognitiveservices',
+      'verify that', 'please verify', 'exists in your', 'is correct', 'is supported'
+    ];
+    const technicalTermCount = technicalTerms.filter(term => lowerMessage.includes(term)).length;
+
+    // If message contains multiple technical terms or is very long, it's likely technical
+    if (technicalTermCount >= 2 || (technicalTermCount >= 1 && message.length > 100)) {
+      return true;
+    }
+
+    return false;
+  };
+
   // Transform technical error messages to cute Snappy messages
   const transformErrorMessage = (message: string): string => {
     const lowerMessage = message.toLowerCase();
 
+    // If it's already a cute message (contains "Snappy"), return as-is
+    if (lowerMessage.includes('snappy')) {
+      return message;
+    }
+
+    // Check if this looks like a technical error - if so, show generic message
+    if (isTechnicalError(message)) {
+      return "Snappy is having trouble processing your photo. Please try again.";
+    }
+
+    // Check for specific user-friendly error patterns and replace with cute messages
     if (lowerMessage.includes('timed out') || lowerMessage.includes('timeout')) {
       const cuteMessages = [
         "Snappy couldn't wake up because he partied too hard last night...",
@@ -84,10 +124,6 @@ export default function MyListingsScreen() {
 
     if (lowerMessage.includes('network') || lowerMessage.includes('connection') || lowerMessage.includes('failed to connect')) {
       return "Snappy can't reach the server right now. Let's try again in a moment...";
-    }
-
-    if (lowerMessage.includes('snappy')) {
-      return message;
     }
 
     return message;

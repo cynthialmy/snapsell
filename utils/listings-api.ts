@@ -603,7 +603,7 @@ export interface UserQuota {
   bonus_creations_remaining: number;
   save_slots_remaining: number;
   free_save_slots: number;
-  resets_at: string;
+  resets_at?: string; // Optional - only present for unauthenticated users
 }
 
 // Helper function for fetch with timeout
@@ -643,8 +643,7 @@ export async function checkAnonymousQuota(): Promise<{ quota: AnonymousQuota | n
       return { quota: null, error: { message: 'Backend not configured' } };
     }
 
-    console.log('[Quota] Checking anonymous quota at:', `${EDGE_FUNCTION_BASE}/anonymous-quota`);
-
+    // Only log on first check or errors (reduced logging to prevent spam)
     const response = await fetchWithTimeout(
       `${EDGE_FUNCTION_BASE}/anonymous-quota`,
       {
@@ -721,8 +720,7 @@ export async function checkQuota(): Promise<{ quota: UserQuota | null; error: an
       return { quota: null, error: { message: 'Backend not configured' } };
     }
 
-    console.log('[Quota] Checking user quota at:', `${EDGE_FUNCTION_BASE}/user-quota`);
-
+    // Only log on errors (reduced logging to prevent spam)
     const response = await fetchWithTimeout(
       `${EDGE_FUNCTION_BASE}/user-quota`,
       {
