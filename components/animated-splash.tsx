@@ -1,5 +1,5 @@
 import { Image } from 'expo-image';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StyleSheet, View } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -24,8 +24,18 @@ export function AnimatedSplash({
   const [imageError, setImageError] = useState(false);
   const opacity = useSharedValue(0);
   const scale = useSharedValue(0.8);
+  const onCompleteRef = useRef(onAnimationComplete);
+  const hasCompletedRef = useRef(false);
+
+  // Update ref when callback changes, but don't re-run effect
+  useEffect(() => {
+    onCompleteRef.current = onAnimationComplete;
+  }, [onAnimationComplete]);
 
   useEffect(() => {
+    // Reset completion flag
+    hasCompletedRef.current = false;
+
     // Fade in and scale up
     opacity.value = withTiming(1, { duration: 300 });
     scale.value = withTiming(1, { duration: 300 });
@@ -36,16 +46,20 @@ export function AnimatedSplash({
       scale.value = withTiming(0.9, { duration: 300 });
 
       setTimeout(() => {
-        setIsVisible(false);
-        onAnimationComplete();
+        if (!hasCompletedRef.current) {
+          hasCompletedRef.current = true;
+          setIsVisible(false);
+          onCompleteRef.current();
+        }
       }, 300);
     }, duration);
 
     // Safety timeout: ensure we always dismiss after duration + fade time + buffer
     const safetyTimer = setTimeout(() => {
-      if (isVisible) {
+      if (!hasCompletedRef.current && isVisible) {
+        hasCompletedRef.current = true;
         setIsVisible(false);
-        onAnimationComplete();
+        onCompleteRef.current();
       }
     }, duration + 1000); // Add 1 second buffer
 
@@ -53,7 +67,7 @@ export function AnimatedSplash({
       clearTimeout(timer);
       clearTimeout(safetyTimer);
     };
-  }, [duration, onAnimationComplete, opacity, scale, isVisible]);
+  }, [duration, opacity, scale, isVisible]); // Removed onAnimationComplete from dependencies
 
   const animatedStyle = useAnimatedStyle(() => ({
     opacity: opacity.value,
@@ -65,7 +79,7 @@ export function AnimatedSplash({
   }
 
   return (
-    <View style={[styles.container, { backgroundColor }]}>
+    <View style={[styles.container, { backgroundColor }]} pointerEvents="none">
       <Animated.View style={[styles.imageContainer, animatedStyle]}>
         <Image
           source={imageSource}
@@ -84,6 +98,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 9999,
+    // Ensure this doesn't block rendering
+    elevation: 0, // Android
   },
   imageContainer: {
     width: 200,

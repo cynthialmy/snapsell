@@ -18,6 +18,7 @@ import { trackEvent } from '@/utils/analytics';
 import { signOut } from '@/utils/auth';
 import { checkQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences, savePreferences, type UserPreferences } from '@/utils/preferences';
+import { isNewDay, updateLastQuotaCheckDate } from '@/utils/quota-storage';
 
 const CURRENCY_OPTIONS = ['$', '€', '£', 'kr', '¥'];
 
@@ -51,12 +52,23 @@ export default function SettingsScreen() {
     }
 
     try {
+      // Check if it's a new day - if so, force refresh from backend
+      const newDay = await isNewDay();
+
+      if (newDay) {
+        console.log('[Settings] New day detected, forcing quota refresh');
+        // Update the check date immediately to prevent multiple refreshes
+        await updateLastQuotaCheckDate();
+      }
+
       const { quota: userQuota, error } = await checkQuota();
       if (error) {
         // Silently handle backend not configured or unavailable
         setQuota(null);
       } else if (userQuota) {
         setQuota(userQuota);
+        // Update last check date after successful quota fetch
+        await updateLastQuotaCheckDate();
       }
     } catch (error) {
       // Silently handle errors - backend might not be set up yet

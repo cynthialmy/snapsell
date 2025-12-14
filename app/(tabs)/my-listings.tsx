@@ -5,15 +5,15 @@ import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
-  Alert,
-  Image,
-  Platform,
-  Pressable,
-  RefreshControl,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View
+    Alert,
+    Image,
+    Platform,
+    Pressable,
+    RefreshControl,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -27,6 +27,7 @@ import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
 import { checkQuota, deleteListing as deleteListingApi, getMyListings, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
+import { isNewDay, updateLastQuotaCheckDate } from '@/utils/quota-storage';
 
 interface Listing {
   id: string;
@@ -136,12 +137,24 @@ export default function MyListingsScreen() {
     }
 
     try {
+      // Check if it's a new day - if so, force refresh from backend
+      const newDay = await isNewDay();
+
+      if (newDay) {
+        console.log('[MyListings] New day detected, forcing quota refresh');
+        // Update the check date immediately to prevent multiple refreshes
+        await updateLastQuotaCheckDate();
+      }
+
       const { quota: userQuota, error } = await checkQuota();
       if (error) {
         setQuota(null);
         return null;
       } else if (userQuota) {
         setQuota(userQuota);
+        // Update last check date after successful quota fetch
+        await updateLastQuotaCheckDate();
+
         // Check total remaining (free + purchased) for low quota nudge
         const totalRemaining = userQuota.creations?.total_remaining ??
           (userQuota.creations_remaining_today + userQuota.bonus_creations_remaining);

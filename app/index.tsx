@@ -2,9 +2,10 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  AppState,
   Platform,
   Pressable,
   ScrollView,
@@ -26,7 +27,7 @@ import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
 import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
-import { getStoredAnonymousQuota, storeAnonymousQuota } from '@/utils/quota-storage';
+import { getStoredAnonymousQuota, isNewDay, storeAnonymousQuota, updateLastQuotaCheckDate } from '@/utils/quota-storage';
 
 // Check if an error message looks technical (contains URLs, version numbers, technical jargon, etc.)
 function isTechnicalError(message: string): boolean {
@@ -616,6 +617,15 @@ export default function HomeScreen() {
     quotaLoadingRef.current = true;
     setQuotaLoading(true);
     try {
+      // Check if it's a new day - if so, force refresh from backend
+      const newDay = await isNewDay();
+
+      if (newDay) {
+        console.log('[Home] New day detected, forcing quota refresh');
+        // Update the check date immediately to prevent multiple refreshes
+        await updateLastQuotaCheckDate();
+      }
+
       const { quota: userQuota, error } = await checkQuota();
       if (error) {
         // Silently handle backend not configured or unavailable
@@ -624,6 +634,9 @@ export default function HomeScreen() {
         return null;
       } else if (userQuota) {
         setQuota(userQuota);
+        // Update last check date after successful quota fetch
+        await updateLastQuotaCheckDate();
+
         // Store previous quota for first listing detection (only if not already set or same user)
         const prevUserQuota = previousQuotaRef.current as UserQuota | null;
         if (!previousQuotaRef.current || (prevUserQuota?.user_id === userQuota.user_id)) {
@@ -699,6 +712,33 @@ export default function HomeScreen() {
       setQuotaLoading(false);
     }
   }, [user, anonymousQuota]);
+
+  // Listen for app state changes to check for new day when app comes to foreground
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', async (nextAppState) => {
+      if (nextAppState === 'active') {
+        // App came to foreground - check if it's a new day
+        const newDay = await isNewDay();
+        if (newDay && user) {
+          console.log('[Home] App came to foreground on new day, refreshing quota');
+          // Update check date and refresh quota
+          await updateLastQuotaCheckDate();
+          loadQuota();
+        } else if (newDay && !user) {
+          // For anonymous users, clear stored quota if expired
+          const stored = await getStoredAnonymousQuota();
+          if (!stored) {
+            // Quota expired, refresh
+            loadAnonymousQuota();
+          }
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [user, loadQuota, loadAnonymousQuota]);
 
   useFocusEffect(
     useCallback(() => {

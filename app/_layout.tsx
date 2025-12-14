@@ -3,8 +3,8 @@ import * as Linking from 'expo-linking';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import * as SplashScreen from 'expo-splash-screen';
 import { StatusBar } from 'expo-status-bar';
-import { useEffect, useState } from 'react';
-import { Alert, Platform } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Alert, AppState, Platform } from 'react-native';
 import 'react-native-reanimated';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -18,6 +18,10 @@ import { parsePaymentCallback, verifyPaymentStatus } from '@/utils/payments';
 
 // Prevent the native splash screen from auto-hiding
 SplashScreen.preventAutoHideAsync();
+
+// Module-level flag to persist splash dismissal across remounts
+// This prevents the splash from re-showing if the component remounts
+let splashDismissedPermanent = false;
 
 function RootLayoutNav() {
   const { user, loading, refreshUser } = useAuth();
@@ -628,6 +632,8 @@ export default function RootLayout() {
   const colorScheme = useColorScheme();
   const [appIsReady, setAppIsReady] = useState(false);
   const [showAnimatedSplash, setShowAnimatedSplash] = useState(false);
+  const safetyTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const splashDismissedRef = useRef(splashDismissedPermanent);
 
   useEffect(() => {
     async function prepare() {
@@ -649,28 +655,86 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
+    // Sync ref with module-level flag
+    splashDismissedRef.current = splashDismissedPermanent;
+
+    // Don't show splash again if it was already dismissed
+    if (splashDismissedPermanent || splashDismissedRef.current) {
+      return;
+    }
+
     async function hideSplashAndShowAnimation() {
-      if (appIsReady) {
+      if (appIsReady && !splashDismissedPermanent && !splashDismissedRef.current) {
+        // Clear any existing timeout first
+        if (safetyTimeoutRef.current) {
+          clearTimeout(safetyTimeoutRef.current);
+          safetyTimeoutRef.current = null;
+        }
+
         // Hide the native splash screen
         await SplashScreen.hideAsync();
         // Show the animated APNG splash
         setShowAnimatedSplash(true);
 
-        // Safety timeout: force dismiss splash after 5 seconds even if animation doesn't complete
-        const safetyTimeout = setTimeout(() => {
+        // Safety timeout: force dismiss splash after 2.5 seconds even if animation doesn't complete
+        // More aggressive timeout to prevent long blocking
+        safetyTimeoutRef.current = setTimeout(() => {
+          splashDismissedRef.current = true;
+          splashDismissedPermanent = true; // Persist across remounts
           setShowAnimatedSplash(false);
-        }, 5000);
-
-        return () => clearTimeout(safetyTimeout);
+          safetyTimeoutRef.current = null;
+        }, 2500);
       }
     }
 
     void hideSplashAndShowAnimation();
+
+    // Return cleanup from useEffect - now we can properly clear the timeout
+    return () => {
+      if (safetyTimeoutRef.current) {
+        clearTimeout(safetyTimeoutRef.current);
+        safetyTimeoutRef.current = null;
+      }
+    };
   }, [appIsReady]);
 
-  const handleAnimatedSplashComplete = () => {
+  const handleAnimatedSplashComplete = useCallback(() => {
+    // Prevent multiple calls
+    if (splashDismissedRef.current) {
+      return;
+    }
+
+    splashDismissedRef.current = true;
+    splashDismissedPermanent = true; // Persist across remounts
+
+    // Clear safety timeout if animation completes early
+    if (safetyTimeoutRef.current) {
+      clearTimeout(safetyTimeoutRef.current);
+      safetyTimeoutRef.current = null;
+    }
+
+    // Force immediate state update - don't wait for interactions if JS thread is blocked
     setShowAnimatedSplash(false);
-  };
+  }, []);
+
+  // Listen for app state changes to force splash dismiss if stuck
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState === 'active') {
+        // If splash was dismissed but state update didn't process, force it now
+        // Also force dismiss if splash has been showing for too long (stuck)
+        if (splashDismissedPermanent || splashDismissedRef.current || showAnimatedSplash) {
+          splashDismissedRef.current = true;
+          splashDismissedPermanent = true; // Persist across remounts
+          setShowAnimatedSplash(false);
+        }
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, [showAnimatedSplash]);
 
   if (!appIsReady) {
     return null;
@@ -682,7 +746,7 @@ export default function RootLayout() {
         <AuthProvider>
           <RootLayoutNav />
           <StatusBar style={colorScheme === 'dark' ? 'light' : 'dark'} />
-          {showAnimatedSplash && (
+          {showAnimatedSplash && !splashDismissedRef.current && (
             <AnimatedSplash
               imageSource={require('@/assets/images/Snappy_Animation.png')}
               backgroundColor={colorScheme === 'dark' ? '#000000' : '#ffffff'}

@@ -781,6 +781,7 @@ export default function ListingPreviewScreen() {
   };
 
   // Handle checkbox toggle - checks auth and shows login gate if needed
+  // NOTE: This only sets the preference - actual save happens on exit (Done/Add next item)
   const handleAutoSaveToggle = async (value: boolean) => {
     console.log('[AutoSave] Toggle attempt:', { value, user: !!user });
 
@@ -803,17 +804,13 @@ export default function ListingPreviewScreen() {
     }
 
     // User is authenticated or unchecking, update preference
+    // NOTE: We do NOT save immediately - save will happen when user exits (Done/Add next item)
     console.log('[AutoSave] Updating preference:', value);
     setAutoSaveListing(value);
     trackEvent('auto_save_toggle', { enabled: value, authenticated: !!user });
 
-    // If checking and authenticated, save immediately
-    // Set the ref first to prevent useEffect from also triggering a save
-    if (value && user) {
-      hasAutoSavedRef.current = true;
-      performSave();
-    } else if (!value) {
-      // Reset when unchecked
+    // Reset ref when unchecked
+    if (!value) {
       hasAutoSavedRef.current = false;
     }
   };
@@ -1656,9 +1653,17 @@ export default function ListingPreviewScreen() {
     }
   };
 
-  const handleReset = () => {
+  const handleReset = async () => {
     setCopySuccess(false);
     trackEvent('add_next_item_clicked', { source: 'listing-preview' });
+
+    // If user has "Save this listing" checked, save before proceeding
+    if (autoSaveListing && user && !backendListingId) {
+      console.log('[Add Next Item] Saving listing before proceeding...');
+      await performSave();
+      // Note: performSave will set backendListingId if successful
+      // We continue regardless of save result
+    }
 
     // Dismiss all modals first before showing the image picker alert
     // Alerts can be blocked by visible modals
@@ -1693,8 +1698,16 @@ export default function ListingPreviewScreen() {
     }
   };
 
-  const handleGoToMyListings = () => {
+  const handleGoToMyListings = async () => {
     trackEvent('go_to_my_listings_clicked', { source: 'listing-preview' });
+
+    // If user has "Save this listing" checked, save before navigating
+    if (autoSaveListing && user && !backendListingId) {
+      console.log('[Done] Saving listing before navigating...');
+      await performSave();
+      // Note: performSave will set backendListingId if successful
+      // We continue regardless of save result
+    }
 
     dismissAllModalsAndNavigate(() => {
       router.push('/(tabs)/my-listings');
@@ -2036,8 +2049,9 @@ export default function ListingPreviewScreen() {
             <Text style={styles.success}>Copied! Paste it into your marketplace.</Text>
           ) : null}
 
-          {/* Only show "Save this listing" checkbox for new listings (no backendListingId) */}
-          {!backendListingId && (
+          {/* Only show "Save this listing" checkbox for new listings or listings just saved in this session */}
+          {/* Hide checkbox only if listing was loaded from "my listings" (params.listingId exists) */}
+          {!params.listingId && (
             <View style={styles.autoSaveSection}>
               <View style={styles.toggleRow}>
                 <View style={styles.toggleLabelContainer}>
@@ -2067,8 +2081,8 @@ export default function ListingPreviewScreen() {
             </View>
           )}
 
-          {/* Show auto-save indicator for existing listings */}
-          {backendListingId && user && (
+          {/* Show auto-save indicator for existing listings loaded from "my listings" */}
+          {params.listingId && backendListingId && user && (
             <View style={styles.autoSaveSection}>
               <Text style={styles.autoSaveHint}>
                 Changes are saved automatically

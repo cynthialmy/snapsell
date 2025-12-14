@@ -1,11 +1,11 @@
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import {
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
+    Pressable,
+    ScrollView,
+    StyleSheet,
+    Text,
+    View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
@@ -13,7 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent } from '@/utils/analytics';
 import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { getPaymentHistory, type PaymentHistoryItem } from '@/utils/payments';
-import { getStoredAnonymousQuota } from '@/utils/quota-storage';
+import { getStoredAnonymousQuota, isNewDay, updateLastQuotaCheckDate } from '@/utils/quota-storage';
 
 export default function UpgradeScreen() {
   const router = useRouter();
@@ -66,6 +66,15 @@ export default function UpgradeScreen() {
 
     // Load user quota for logged-in users
     try {
+      // Check if it's a new day - if so, force refresh from backend
+      const newDay = await isNewDay();
+
+      if (newDay) {
+        console.log('[Upgrade] New day detected, forcing quota refresh');
+        // Update the check date immediately to prevent multiple refreshes
+        await updateLastQuotaCheckDate();
+      }
+
       const { quota: userQuota, error } = await checkQuota();
       if (error) {
         console.error('[Upgrade] Error loading quota:', error);
@@ -77,6 +86,8 @@ export default function UpgradeScreen() {
         setQuota(null);
       } else {
         setQuota(userQuota);
+        // Update last check date after successful quota fetch
+        await updateLastQuotaCheckDate();
       }
     } catch (error) {
       console.error('[Upgrade] Exception loading quota:', error);
