@@ -284,3 +284,39 @@ If needed, you can further use the `web_scraper.py` file to scrape the web page 
 - `contexts/AuthContext.tsx`: Added session-level flag to prevent migration from running multiple times per session
 
 **Status:** ✅ Fixed - Migration now runs only once per user, preventing duplicate listings
+
+## Fix iOS Navigation Blocking Issue (2025-01-XX)
+
+**Problem:** iOS app gets stuck and won't navigate to next screen unless user backgrounds/foregrounds the app. App also gets stuck at splash screen or during API calls.
+
+**Root Cause:**
+- React Native `Modal` components block ALL touch events and navigation when `visible={true}`
+- Navigation was being called immediately after `setShowModal(false)`, but modal was still visible/animating (fade animation takes 200-300ms)
+- Alerts can also be blocked by visible modals
+- Backgrounding/foregrounding resets state, allowing navigation to work
+
+**Solution Implemented:**
+- Added `InteractionManager` import to ensure navigation happens after interactions complete
+- Created `dismissModalAndNavigate()` helper that:
+  - Dismisses modal first
+  - Waits for interactions to complete via `InteractionManager.runAfterInteractions()`
+  - Adds 150ms delay to ensure Modal fade animation completes
+  - Then navigates
+- Created `dismissAllModalsAndNavigate()` helper for cases where multiple modals might be visible
+- Updated all navigation handlers:
+  - `handleReset` - dismisses modals before showing image picker Alert
+  - `handleGoToMyListings` - dismisses modals before navigation
+  - All modal `onUpgrade`, `onBuySlots`, `onGoUnlimited` handlers
+- Updated `handlePickImage` to dismiss modals before showing Alert (Alerts can be blocked by modals)
+
+**Key Changes:**
+- `app/(tabs)/listing-preview.tsx`: Added modal dismissal helpers and updated all navigation/alert handlers
+- Always dismiss modals before navigation or showing Alerts
+- Use `InteractionManager.runAfterInteractions()` + 150ms delay to ensure modals are fully closed
+
+**TurboModuleManager Timeout Note:**
+- This is a separate development-time issue, typically caused by hot reload/fast refresh
+- Fix by: restart Metro bundler with `--clear` flag, or rebuild the app
+- Not related to the navigation blocking issue
+
+**Status:** ✅ Fixed - Navigation now works immediately without needing to background/foreground app

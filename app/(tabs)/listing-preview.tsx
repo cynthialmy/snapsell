@@ -7,6 +7,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  InteractionManager,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -1600,9 +1601,36 @@ export default function ListingPreviewScreen() {
     );
   };
 
-  const handleReset = () => {
-    try {
-      // Dismiss any visible modals first
+  // Helper function to dismiss a specific modal and navigate after it closes
+  const dismissModalAndNavigate = (modalSetter: () => void, navigationCallback: () => void) => {
+    // Dismiss the modal first
+    modalSetter();
+
+    // Wait for modal to close (React Native Modal needs time to animate out)
+    // Use InteractionManager to wait for interactions to complete, then add a small delay
+    InteractionManager.runAfterInteractions(() => {
+      // Additional delay to ensure Modal component has fully closed
+      // Modal fade animation is typically 200-300ms, so 150ms should be safe
+      setTimeout(() => {
+        navigationCallback();
+      }, 150);
+    });
+  };
+
+  // Helper function to dismiss all modals and ensure they're closed before navigation
+  const dismissAllModalsAndNavigate = (navigationCallback: () => void) => {
+    // Check if any modals are currently visible
+    const hasVisibleModals =
+      showQuotaModal ||
+      showPaywall ||
+      showBlockedModal ||
+      showBlockedSaveModal ||
+      showLowSlotsWarning ||
+      showLowQuotaNudge ||
+      showLoginGate;
+
+    if (hasVisibleModals) {
+      // Dismiss all modals first
       setShowQuotaModal(false);
       setShowPaywall(false);
       setShowBlockedModal(false);
@@ -1610,67 +1638,67 @@ export default function ListingPreviewScreen() {
       setShowLowSlotsWarning(false);
       setShowLowQuotaNudge(false);
       setShowLoginGate(false);
-      setCopySuccess(false);
 
-      trackEvent('add_next_item_clicked', { source: 'listing-preview' });
+      // Wait for modals to close (React Native Modal needs time to animate out)
+      // Use InteractionManager to wait for interactions to complete, then add a small delay
+      InteractionManager.runAfterInteractions(() => {
+        // Additional delay to ensure Modal component has fully closed
+        // Modal fade animation is typically 200-300ms, so 150ms should be safe
+        setTimeout(() => {
+          navigationCallback();
+        }, 150);
+      });
+    } else {
+      // No modals visible, navigate immediately but still use InteractionManager
+      InteractionManager.runAfterInteractions(() => {
+        navigationCallback();
+      });
+    }
+  };
 
-      // Navigate immediately - no delays or complex timing
+  const handleReset = () => {
+    setCopySuccess(false);
+    trackEvent('add_next_item_clicked', { source: 'listing-preview' });
+
+    // Dismiss all modals first before showing the image picker alert
+    // Alerts can be blocked by visible modals
+    const hasVisibleModals =
+      showQuotaModal ||
+      showPaywall ||
+      showBlockedModal ||
+      showBlockedSaveModal ||
+      showLowSlotsWarning ||
+      showLowQuotaNudge ||
+      showLoginGate;
+
+    if (hasVisibleModals) {
+      // Dismiss all modals first
+      setShowQuotaModal(false);
+      setShowPaywall(false);
+      setShowBlockedModal(false);
+      setShowBlockedSaveModal(false);
+      setShowLowSlotsWarning(false);
+      setShowLowQuotaNudge(false);
+      setShowLoginGate(false);
+
+      // Wait for modals to close before showing alert
+      InteractionManager.runAfterInteractions(() => {
+        setTimeout(() => {
+          handlePickImage();
+        }, 150);
+      });
+    } else {
+      // No modals visible, show picker immediately
       handlePickImage();
-    } catch (error) {
-      console.error('[Navigation] Error in handleReset:', error);
-      // Fallback: try navigation anyway
-      try {
-        handlePickImage();
-      } catch (fallbackError) {
-        console.error('[Navigation] Fallback navigation also failed:', fallbackError);
-      }
     }
   };
 
   const handleGoToMyListings = () => {
-    console.log('[Navigation] handleGoToMyListings called');
-    try {
-      // Dismiss any visible modals first
-      console.log('[Navigation] Dismissing modals...');
-      setShowQuotaModal(false);
-      setShowPaywall(false);
-      setShowBlockedModal(false);
-      setShowBlockedSaveModal(false);
-      setShowLowSlotsWarning(false);
-      setShowLowQuotaNudge(false);
-      setShowLoginGate(false);
+    trackEvent('go_to_my_listings_clicked', { source: 'listing-preview' });
 
-      console.log('[Navigation] Tracking event...');
-      trackEvent('go_to_my_listings_clicked', { source: 'listing-preview' });
-
-      // Use setTimeout(0) to ensure navigation happens after state updates complete
-      console.log('[Navigation] Scheduling navigation...');
-      setTimeout(() => {
-        try {
-          console.log('[Navigation] Attempting navigation to my-listings...');
-          router.replace('/(tabs)/my-listings');
-          console.log('[Navigation] Navigation call completed');
-        } catch (navError) {
-          console.error('[Navigation] Navigation error:', navError);
-          // Fallback: try push instead of replace
-          try {
-            console.log('[Navigation] Trying fallback navigation with push...');
-            router.push('/(tabs)/my-listings');
-          } catch (fallbackError) {
-            console.error('[Navigation] Fallback navigation also failed:', fallbackError);
-            // Last resort: try navigating to home first
-            try {
-              console.log('[Navigation] Trying last resort navigation to tabs...');
-              router.replace('/(tabs)');
-            } catch (lastResortError) {
-              console.error('[Navigation] Last resort navigation failed:', lastResortError);
-            }
-          }
-        }
-      }, 0);
-    } catch (error) {
-      console.error('[Navigation] Error in handleGoToMyListings:', error);
-    }
+    dismissAllModalsAndNavigate(() => {
+      router.push('/(tabs)/my-listings');
+    });
   };
 
   const handleLocateMe = async () => {
@@ -2092,7 +2120,9 @@ export default function ListingPreviewScreen() {
         count={quotaCount}
         period={getQuotaPeriod()}
         onUpgrade={() => {
-          router.push('/(tabs)/upgrade');
+          dismissModalAndNavigate(() => setShowQuotaModal(false), () => {
+            router.push('/(tabs)/upgrade');
+          });
         }}
         onContinueFree={async () => {
           if (user?.id) {
@@ -2108,12 +2138,14 @@ export default function ListingPreviewScreen() {
         visible={showPaywall}
         limit={quota?.free_save_slots || 10}
         onBuySlots={() => {
-          setShowPaywall(false);
-          router.push('/(tabs)/upgrade');
+          dismissModalAndNavigate(() => setShowPaywall(false), () => {
+            router.push('/(tabs)/upgrade');
+          });
         }}
         onGoUnlimited={() => {
-          setShowPaywall(false);
-          router.push('/(tabs)/upgrade');
+          dismissModalAndNavigate(() => setShowPaywall(false), () => {
+            router.push('/(tabs)/upgrade');
+          });
         }}
         onDismiss={() => {
           setShowPaywall(false);
@@ -2128,8 +2160,9 @@ export default function ListingPreviewScreen() {
           setShowLowSlotsWarning(false);
         }}
         onUpgrade={() => {
-          setShowLowSlotsWarning(false);
-          router.push('/(tabs)/upgrade');
+          dismissModalAndNavigate(() => setShowLowSlotsWarning(false), () => {
+            router.push('/(tabs)/upgrade');
+          });
         }}
       />
 
@@ -2158,8 +2191,9 @@ export default function ListingPreviewScreen() {
             type="creation"
             onDismiss={() => setShowLowQuotaNudge(false)}
             onUpgrade={() => {
-              setShowLowQuotaNudge(false);
-              router.push('/(tabs)/upgrade');
+              dismissModalAndNavigate(() => setShowLowQuotaNudge(false), () => {
+                router.push('/(tabs)/upgrade');
+              });
             }}
           />
         </>
