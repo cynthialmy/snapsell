@@ -27,7 +27,7 @@ import { formatListingText } from '@/utils/listingFormatter';
 import { saveListing } from '@/utils/listings';
 import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { loadPreferences } from '@/utils/preferences';
-import { getStoredAnonymousQuota, isNewDay, storeAnonymousQuota, updateLastQuotaCheckDate } from '@/utils/quota-storage';
+import { clearStoredAnonymousQuota, getStoredAnonymousQuota, isNewDay, storeAnonymousQuota, updateLastQuotaCheckDate } from '@/utils/quota-storage';
 
 // Check if an error message looks technical (contains URLs, version numbers, technical jargon, etc.)
 function isTechnicalError(message: string): boolean {
@@ -666,7 +666,7 @@ export default function HomeScreen() {
   }, [user]);
 
   // Load anonymous quota for unauthenticated users
-  const loadAnonymousQuota = useCallback(async () => {
+  const loadAnonymousQuota = useCallback(async (forceRefresh: boolean = false) => {
     if (user) {
       setAnonymousQuota(null);
       return null;
@@ -680,24 +680,55 @@ export default function HomeScreen() {
     quotaLoadingRef.current = true;
     setQuotaLoading(true);
     try {
-      // First, try to load quota from AsyncStorage (from API responses)
-      const storedQuota = await getStoredAnonymousQuota();
-      if (storedQuota) {
-        setAnonymousQuota(storedQuota);
-        previousQuotaRef.current = storedQuota;
-        quotaLoadingRef.current = false;
-        setQuotaLoading(false);
-        return storedQuota;
+      // Check if it's a new day - if so, clear stored quota to force refresh
+      const newDay = await isNewDay();
+
+      if (newDay) {
+        console.log('[Home] New day detected for anonymous user, clearing stored quota');
+        // Clear stored anonymous quota so we get fresh quota
+        await clearStoredAnonymousQuota();
+        // Update the check date to prevent multiple refreshes
+        await updateLastQuotaCheckDate();
       }
 
-      // If no stored quota, fetch from backend (only for initial load)
+      // If force refresh or new day, always fetch from backend
+      // Otherwise, try to load from AsyncStorage first (for performance)
+      if (!forceRefresh && !newDay) {
+        const storedQuota = await getStoredAnonymousQuota();
+        if (storedQuota) {
+          setAnonymousQuota(storedQuota);
+          previousQuotaRef.current = storedQuota;
+          // Update last check date after successful load
+          await updateLastQuotaCheckDate();
+          quotaLoadingRef.current = false;
+          setQuotaLoading(false);
+          return storedQuota;
+        }
+      }
+
+      // Fetch from backend (on app start, new day, or when no stored quota)
       const { quota: anonymousQuotaData, error } = await checkAnonymousQuota();
       if (error) {
         // Silently handle backend not configured or unavailable
+        // Fallback to stored quota if available
+        if (!forceRefresh) {
+          const storedQuota = await getStoredAnonymousQuota();
+          if (storedQuota) {
+            setAnonymousQuota(storedQuota);
+            previousQuotaRef.current = storedQuota;
+            quotaLoadingRef.current = false;
+            setQuotaLoading(false);
+            return storedQuota;
+          }
+        }
         setAnonymousQuota(null);
         return null;
       } else if (anonymousQuotaData) {
         setAnonymousQuota(anonymousQuotaData);
+        // Store quota in AsyncStorage for future use
+        await storeAnonymousQuota(anonymousQuotaData);
+        // Update last check date after successful fetch
+        await updateLastQuotaCheckDate();
         // Store previous quota for first listing detection
         previousQuotaRef.current = anonymousQuotaData;
         return anonymousQuotaData;
@@ -705,6 +736,21 @@ export default function HomeScreen() {
       return null;
     } catch (error) {
       // Silently handle errors - backend might not be set up yet
+      // Fallback to stored quota if available
+      if (!forceRefresh) {
+        try {
+          const storedQuota = await getStoredAnonymousQuota();
+          if (storedQuota) {
+            setAnonymousQuota(storedQuota);
+            previousQuotaRef.current = storedQuota;
+            quotaLoadingRef.current = false;
+            setQuotaLoading(false);
+            return storedQuota;
+          }
+        } catch {
+          // Ignore fallback errors
+        }
+      }
       setAnonymousQuota(null);
       return null;
     } finally {
@@ -725,12 +771,11 @@ export default function HomeScreen() {
           await updateLastQuotaCheckDate();
           loadQuota();
         } else if (newDay && !user) {
-          // For anonymous users, clear stored quota if expired
-          const stored = await getStoredAnonymousQuota();
-          if (!stored) {
-            // Quota expired, refresh
-            loadAnonymousQuota();
-          }
+          // For anonymous users, new day detected - refresh quota
+          console.log('[Home] App came to foreground on new day for anonymous user, refreshing quota');
+          // Update check date and refresh quota (loadAnonymousQuota will clear stored quota)
+          await updateLastQuotaCheckDate();
+          loadAnonymousQuota();
         }
       }
     });
@@ -761,7 +806,10 @@ export default function HomeScreen() {
       if (user) {
         loadQuota();
       } else {
-        loadAnonymousQuota();
+        // On app start (first focus), always fetch from backend to get fresh quota
+        // Use a ref to track if this is the first load
+        const isFirstLoad = quotaUpdatedFromResponseRef.current === 0;
+        loadAnonymousQuota(isFirstLoad);
       }
     }, [loadQuota, loadAnonymousQuota, user]), // Removed quota and anonymousQuota from deps to prevent infinite loop
   );

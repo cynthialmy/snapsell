@@ -13,7 +13,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { trackEvent } from '@/utils/analytics';
 import { checkAnonymousQuota, checkQuota, type AnonymousQuota, type UserQuota } from '@/utils/listings-api';
 import { getPaymentHistory, type PaymentHistoryItem } from '@/utils/payments';
-import { getStoredAnonymousQuota, isNewDay, updateLastQuotaCheckDate } from '@/utils/quota-storage';
+import { clearStoredAnonymousQuota, getStoredAnonymousQuota, isNewDay, updateLastQuotaCheckDate } from '@/utils/quota-storage';
 
 export default function UpgradeScreen() {
   const router = useRouter();
@@ -30,7 +30,20 @@ export default function UpgradeScreen() {
     setLoading(true);
 
     if (!user) {
-      // For anonymous users, load quota from AsyncStorage (from API responses)
+      // For anonymous users, check if it's a new day - if so, clear stored quota
+      const newDay = await isNewDay();
+
+      if (newDay) {
+        console.log('[Upgrade] New day detected for anonymous user, clearing stored quota');
+        // Clear stored anonymous quota so we get fresh quota
+        await clearStoredAnonymousQuota();
+        // Update the check date to prevent multiple refreshes
+        await updateLastQuotaCheckDate();
+        // Clear the ref so we fetch fresh quota
+        anonymousQuotaRef.current = null;
+      }
+
+      // Load quota from AsyncStorage (from API responses)
       // The backend /anonymous-quota endpoint doesn't track per-device quota,
       // so it will always return stale data (10). We should only use quota
       // from API responses (analyze-image endpoint), which tracks quota correctly.
@@ -38,8 +51,10 @@ export default function UpgradeScreen() {
       if (storedQuota) {
         setAnonymousQuota(storedQuota);
         anonymousQuotaRef.current = storedQuota;
+        // Update last check date after successful load
+        await updateLastQuotaCheckDate();
       } else if (!anonymousQuotaRef.current) {
-        // Only fetch from backend if we don't have quota at all (initial load)
+        // Only fetch from backend if we don't have quota at all (initial load or new day)
         try {
           const { quota: anonQuota, error } = await checkAnonymousQuota();
           if (error) {
@@ -49,6 +64,8 @@ export default function UpgradeScreen() {
           } else {
             setAnonymousQuota(anonQuota);
             anonymousQuotaRef.current = anonQuota;
+            // Update last check date after successful fetch
+            await updateLastQuotaCheckDate();
           }
         } catch (error) {
           console.error('[Upgrade] Exception loading anonymous quota:', error);
