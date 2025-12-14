@@ -121,6 +121,48 @@ npx expo start --clear
 npx expo run:ios
 ```
 
+**Troubleshooting Simulator Timeout Errors:**
+
+If you see errors like `xcrun simctl openurl ... Operation timed out` when trying to open the app in the simulator:
+
+1. **Ensure the simulator is fully booted:**
+   ```bash
+   # Check if simulator is running
+   xcrun simctl list devices | grep Booted
+
+   # If not booted, boot it manually
+   xcrun simctl boot "iPhone 15 Pro"  # or your device name
+   ```
+
+2. **Kill and restart the simulator:**
+   ```bash
+   # Kill all simulators
+   killall Simulator
+
+   # Then restart Metro and rebuild
+   npx expo start --clear
+   npx expo run:ios
+   ```
+
+3. **Uninstall and reinstall the development client:**
+   - In simulator, long-press the app icon → Delete App
+   - Then rebuild: `npx expo run:ios`
+
+4. **Reset the simulator:**
+   ```bash
+   # Erase all content and settings
+   xcrun simctl erase all
+   ```
+
+5. **Check if the development client is installed:**
+   - The error suggests the deep link handler isn't responding
+   - Make sure you're using a development build (`expo run:ios`), not Expo Go
+   - Development builds require `expo-dev-client` (already in package.json)
+
+6. **Try opening the app manually:**
+   - Instead of letting Expo auto-open, manually tap the app icon in the simulator
+   - Then the deep link should work on subsequent opens
+
 ### Solution 2: Ensure Same Network Connection
 
 If you prefer using LAN mode (faster, but requires same network):
